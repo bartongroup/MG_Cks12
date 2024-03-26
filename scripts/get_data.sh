@@ -1,0 +1,1 @@
+rsync -avm --include='*/' --include-from=scripts/rsync_include.txt --exclude='*' cluster:/cluster/gjb_lab/mgierlinski/projects/cks12/ rna_seq

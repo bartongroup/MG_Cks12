@@ -1,0 +1,9 @@
+{
+  "data_path" : "rna_seq",
+  "sample_file" : "rna_seq/config/samples.txt",
+  "species" : "human",
+  "ensembl_dataset" : "hsapiens_gene_ensembl",
+  "ensembl_version" : "111",
+  "logfc_limit" : 1,
+  "fdr_limit" : 0.01
+}

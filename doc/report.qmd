@@ -1,0 +1,207 @@
+---
+title: "Impact of Cks1/2 on the transcriptome"
+author:
+  - name: Marek Gierlinski
+    affiliations: Data Analysis Group
+    note: "Creator of this report"
+  - name: Tony Ly
+    affiliations: MCDB
+    note: PI
+date: today
+date-format: "D MMMM YYYY"
+execute:
+  echo: false
+  cache: true
+  warning: false
+format:
+  html:
+    theme:
+      - journal
+      - report.scss
+    toc: true
+    number-sections: true
+self-contained: true
+editor: 
+  markdown: 
+    wrap: 72
+---
+
+```{r libraries}
+suppressPackageStartupMessages({
+  library(ggplot2)
+  library(dplyr)
+  library(targets)
+  library(gt)
+})
+tar_config_set(store = "../_targets")
+```
+
+# Proposal
+
+The purpose of this project is to characterize the impact of Cks1/2 depletion on the proteome and transcriptome. Two human cell lines (HeLa and RPE1) were treated with either non-targeting siRNA, or siRNA targeting Cks1/2. Samples were then sent for RNAseq (Novogene) and MS-based proteomics (FingerPrints) analysis. Illumina paired end sequencing on polyA+ selected mRNAs was performed. There are 16 raw sequence read files. Matched samples are in the queue for proteomics analysis. We would like assistance
+
+ 1. mapping RNAseq reads and differential expression analysis,
+ 2. normalizing and comparing proteomics data to RNAseq,
+ 3. generating a web/html-based resource to visualize these datasets.
+
+
+
+# Sequencing and mapping
+
+@tbl-software lists the software tools used for the cleaning, quality control, and mapping of FASTQ files. These operations were conducted on the Life Sciences cluster utilizing a *snakemake* script. Subsequently, the data were imported into RStudio and further processed using R.
+
+```{r}
+#| label: tbl-software
+#| tbl-cap: Software used for cleaning, quality control and mapping FASTQ files.
+tibble::tribble(
+  ~Software, ~Version, ~Purpose,
+  "Trim Galore!", "0.6.10", "Trimming adapters",
+  "RiboDetector", "0.3.1", "Removing ribosomal contamination",
+  "FastQC", "0.12.1", "Quality control",
+  "FastQ Screen", "0.15.3", "Checking sample contamination",
+  "STAR", "2.7.11a", "Mapping"
+) |> 
+  gt()
+```
+
+## Sequencing
+
+Sequencing was done by NovaGene. 
+
+## Ribosomal RNA removal
+
+A tool [RiboDetector](https://github.com/hzi-bifo/RiboDetector) was used to remove reads matching ribosomal RNA from FASTQ files. RiboDetector is a machine learning tool that can recognize ribosomal RNA. @fig-ribo illustrates ...
+
+
+```{r}
+#| label: fig-ribo
+#| fig-cap: Proportion of ribosomal reads detected in each sample.
+#| fig-width: 5
+#| fig-height: 5
+#tar_read(fig_ribo_prop)
+```
+
+## FastQ screen
+
+[FastQ screen](https://www.bioinformatics.babraham.ac.uk/projects/fastq_screen/) was used to map a sample of reads to several genomes to check for contamination. @fig-fscreen shows one hit one genome percentage. Note, the fill scale is logarithmic with grey indicating zero.
+
+```{r}
+#| label: fig-fscreen
+#| fig-cap: Fscreen results, one hit per one genome and multiple hits per one genome are inluded.
+#| fig-width: 4.5
+#| fig-height: 4
+#tar_read(fig_fscreen)
+```
+
+## Read quality
+
+@fig-read-qual shows read quality as a function of base pair position, @fig-read-qual-clust shows hierarchical clustering based on read quality. This has nothing to do with biology, but rather shows potential batch effects related to sequencing, e.g. different flow cells, different instruments.
+
+```{r}
+#| label: fig-read-qual
+#| fig-cap: Read quality.
+#| fig-width: 8
+#| fig-height: 3
+#tar_read(fig_read_qual) 
+```
+
+```{r}
+#| label: fig-read-qual-clust
+#| fig-cap: Clustering based on read quality.
+#| fig-width: 4
+#| fig-height: 3
+#tar_read(fig_read_qual_clust)
+```
+
+
+## Mapping
+
+[STAR](https://github.com/alexdobin/STAR) was used to map reads to the reference genome GRCh38 downloaded from Ensembl (release 111). The following parameters were used:
+
+```         
+--outFilterType BySJout 
+--outSAMtype BAM SortedByCoordinate
+--outFilterMultimapNmax 2
+--readFilesCommand zcat
+--quantMode GeneCounts
+```
+
+
+## Mapping properties
+
+@fig-star-log and @fig-map-count show mapping summaries.
+
+```{r}
+#| label: fig-star-log
+#| fig-cap: STAR mapping properties. 
+#| fig-width: 6
+#| fig-height: 10
+#tar_read(fig_star_log) 
+```
+
+```{r}
+#| label: fig-map-count
+#| fig-cap: Input counts vs mapped and counted reads. Samples are ordered from the lowest to the highest percentage of uniquely mapped reads.
+#| fig-width: 8
+#| fig-height: 4
+#tar_read(fig_map_count)
+```
+
+
+## Strandedness
+
+Depending on the protocol stranded data can be either way. STAR provides the following in the quantification file:
+
+-   column 2: counts for unstranded RNA-seq
+-   column 3: counts for the 1st read strand aligned with RNA
+-   column 4: counts for the 2nd read strand aligned with RNA
+
+@fig-star-sense shows the summary of total counts in each column of one example file. Our data are ...
+
+```{r}
+#| label: fig-star-sense
+#| fig-cap: Distribution of log read count per STAR output file column. The second strand reads are dominant, so we read column 4.
+#| fig-width: 5
+#| fig-height: 3
+#tar_read(fig_star_sense)
+```
+
+# Properties
+
+@fig-sample-dist shows read count distribution. No issues here.
+
+```{r}
+#| label: fig-sample-dist
+#| fig-cap: Distribution of regularised log-count per sample.
+#| fig-width: 8
+#| fig-height: 4
+#tar_read(fig_sample_dist)  
+```
+
+Next figures are based on [regularised logarithm](https://rdrr.io/bioc/DESeq2/man/rlog.html) (rlog) of raw count data. @fig-properties shows Pearson's correlation coefficient between each pair of samples, PCA results and hierarchical clustering.
+
+```{r}
+#| label: fig-properties
+#| fig-cap: A. Correlation matrix. B. PCA of rlog-transformed counts. C. Hierarchical clustering of samples based on rlog-transformed counts and correlation distance.
+#| fig-width: 8
+#| fig-height: 6
+#g1 <- tar_read(fig_distance_mat)
+#g2 <- tar_read(fig_pca)
+#g3 <- tar_read(fig_clustering) 
+#cowplot::plot_grid(g1, g2, g3, nrow = 2, labels = c("A", "B", "C"))
+```
+
+
+# Resources
+
+## Code
+
+All analysis in this report has been done in R. The source code can be found on [GitHub](https://github.com/bartongroup/MG_Cks12).
+
+## Session info
+
+```{r}
+#| label: session-info
+#| cache: false
+readLines("session_info.txt") |> writeLines(stdout())
+```

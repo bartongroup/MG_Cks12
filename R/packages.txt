@@ -1,0 +1,14 @@
+qs
+tidyverse
+biomaRt
+edgeR
+jsonlite
+ggdendro
+dendsort
+broom
+cowplot
+ggbeeswarm
+ggpointdensity
+ggrepel
+fgsea
+fenr
