@@ -17,7 +17,7 @@ targets_main <- function() {
   )
   
   qc <- tar_plan(
-    fastq_len = read_fastq_lengths(metadata),
+    fastq_len = read_fastq_lengths(config, metadata),
     fig_ribo_prop = plot_ribo_proportion(fastq_len),
     
     fscrn = parse_fscreens(config, metadata),
@@ -33,7 +33,6 @@ targets_main <- function() {
     fig_chrom_proportion = plot_chrom_proportion(idxstats, chromosomes, per_length = TRUE),
     fig_chrom_count = plot_chrom_proportion(idxstats, chromosomes, per_length = FALSE),
     fig_scaffold_count = plot_chrom_proportion(idxstats, scaffolds, per_length = FALSE),
-    fig_bed_17 = plot_bedgraphs_region(bg, "17", 30, 40),
     
     fig_sample_dist = plot_sample_distributions(star, x_breaks = c(0, 1, 2, 3, 4, 5), x_lim = c(-1, 5), ncol = 4, colour_var = "condition"),
     fig_mean_var = plot_mean_var(star, group_var = "condition"),

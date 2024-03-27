@@ -48,7 +48,7 @@ The purpose of this project is to characterize the impact of Cks1/2 depletion on
 
 # Sequencing and mapping
 
-@tbl-software lists the software tools used for the cleaning, quality control, and mapping of FASTQ files. These operations were conducted on the Life Sciences cluster utilizing a *snakemake* script. Subsequently, the data were imported into RStudio and further processed using R.
+@tbl-software lists the software tools used for the cleaning, quality control, and mapping of FASTQ files. These operations were conducted on the Life Sciences cluster utilizing a [snakemake](https://raw.githubusercontent.com/bartongroup/MG_Cks12/main/rna_seq/Snakefile?token=GHSAT0AAAAAACML2LJKPBONK2PV7GSTPJOQZQC2CFA) script. Subsequently, the data were imported into RStudio and further processed using R.
 
 ```{r}
 #| label: tbl-software
@@ -66,7 +66,7 @@ tibble::tribble(
 
 ## Sequencing
 
-Sequencing was done by NovaGene. 
+Sequencing was done by NovoGene. 
 
 ## Ribosomal RNA removal
 

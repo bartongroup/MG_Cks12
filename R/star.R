@@ -9,8 +9,8 @@ one_count_file <- function(config, meta, n) {
 
 read_and_process_star <- function(config, meta, gene_info, suffix = ".txt", min_count = 10,
                                   fix_names_fun = NULL) {
-  readcount_path <- file.path(config$data_path, "readcount")
-  starmap_path <- file.path(config$data_path, "starmap")
+  readcount_path <- file.path(config$data_path, config$dir$read_count)
+  starmap_path <- file.path(config$data_path, config$dir$mapping)
   
   star_column <- star_strand_column(readcount_path, meta, suffix)
   cat(paste0("Detected strand - ", names(star_column), ". Reading STAR column ", star_column, ".\n"))

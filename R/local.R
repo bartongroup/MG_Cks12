@@ -28,10 +28,12 @@ coding_only <- function(set, gns) {
 }
 
 
-read_fastq_lengths <- function(meta) {
-  f_trim <- read_fastq_length("rna_seq/fastq_trimmed", meta) |> 
+read_fastq_lengths <- function(config, meta) {
+  trimmed_path <- file.path(config$data_path, config$dir$fastq_trimmed)
+  f_trim <- read_fastq_length(trimmed_path, meta) |> 
     add_column(type = "Trimmed")
-  f_clean <- read_fastq_length("rna_seq/fastq_clean", meta) |> 
+  clean_path <- file.path(config$data_path, config$dir$clean_trimmed)
+  f_clean <- read_fastq_length(clean_path, meta) |> 
     add_column(type = "Clean")
   bind_rows(f_trim, f_clean)
 }

@@ -6,7 +6,7 @@ parse_one_fscreen <- function(file, raw_sample) {
 
 
 parse_fscreens <- function(config, meta, suffix = "_R1_screen.txt") {
-  path <- file.path(config$data_path, "fscreen")
+  path <- file.path(config$data_path, config$dir$fastq_screen)
   meta$raw_sample |> 
     map(function(rs) {
       file <- file.path(path, str_c(rs, suffix))
@@ -87,7 +87,7 @@ parse_one_qc <- function(zip_file, root) {
 }
 
 parse_qcs <- function(config, meta, paired, suffix = "_fastqc.zip") {
-  path <- file.path(config$data_path, "qc")
+  path <- file.path(config$data_path, config$dir$qc)
   if (paired) {
     roots <-  make_roots_paired(meta)
   } else {
@@ -163,7 +163,7 @@ read_houskeeping_genes <- function(path, classes = c("Ribosomal", "Citric", "RNA
 }
 
 parse_idxstats <- function(config, meta) {
-  path <- file.path(config$data_path, "chrcount")
+  path <- file.path(config$data_path, config$dir$chr_count)
   map2_dfr(meta$raw_sample, meta$sample, function(rsam, sam) {
     sfile <- file.path(path, glue::glue("{rsam}.txt"))
     if (file.exists(sfile)) {

@@ -1,14 +1,12 @@
 read_bedgraphs <- function(config) {
-  path <- file.path(config$data_path, "bedgraph")
-  map2_dfr(meta$raw_sample, meta$sample, function(rsam, sam) {
+  path <- file.path(config$data_path, config$dir$bedgraph)
+  map2(meta$raw_sample, meta$sample, function(rsam, sam) {
     bfile <- file.path(path, glue::glue("{rsam}.{window_size}.bedgraph"))
     read_tsv(bfile, col_names = c("chr", "start", "end", "score"), col_types = "ciid") |> 
       add_column(sample = sam)
-  })
+  }) |> 
+    list_rbind()
 }
-
-
-
 
 plot_bedgraphs_region <- function(bg, .chr, .start, .end) {
   bg |>

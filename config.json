@@ -1,9 +1,21 @@
 {
   "data_path" : "rna_seq",
-  "sample_file" : "rna_seq/config/samples.txt",
+  "dir" : {
+    "fastq_trimmed" : "fastq_trimmed",
+    "fastq_clean" : "fastq_clean",
+    "mapping" : "starmap",
+    "read_count" : "readcount",
+    "chr_count" : "chrcount",
+    "fastq_screen" : "fscreen",
+    "bedgraph" : "bedgraph",
+    "qc" : "qc" 
+  },
+  "sample_file" : "config/samples.txt",
   "species" : "human",
-  "ensembl_dataset" : "hsapiens_gene_ensembl",
-  "ensembl_version" : "111",
+  "ensembl" : {
+    "dataset" : "hsapiens_gene_ensembl",
+    "version" : "111"
+  },
   "logfc_limit" : 1,
   "fdr_limit" : 0.01
 }
