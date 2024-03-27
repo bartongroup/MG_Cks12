@@ -1,34 +1,63 @@
 one_count_file <- function(config, meta, n) {
-  path <- file.path(config$data_path, "readcount")
+  path <- file.path(config$data_path, config$dir$read_count)
   rs <- meta |> 
     slice(n) |> 
     pull(raw_sample) 
   file.path(path, str_glue("{rs}.txt"))
 }
 
-
+#' Read and Process STAR Output
+#'
+#' Reads STAR output files, processes them by adding gene names, normalizing counts,
+#' filtering based on minimum count, and applying additional processing such as
+#' log transformations.
+#'
+#' @param config A list containing configuration options, including paths.
+#' @param meta Metadata data frame for the samples.
+#' @param gene_info Data frame containing gene information.
+#' @param suffix (Optional) File suffix for read count files, defaults to ".txt".
+#' @param min_count (Optional) Minimum count threshold for filtering, defaults to 10.
+#' @param fix_names_fun (Optional) A function to fix gene names, defaults to NULL.
+#' @return A processed data set after applying all transformations and filters.
 read_and_process_star <- function(config, meta, gene_info, suffix = ".txt", min_count = 10,
                                   fix_names_fun = NULL) {
   readcount_path <- file.path(config$data_path, config$dir$read_count)
   starmap_path <- file.path(config$data_path, config$dir$mapping)
   
   star_column <- star_strand_column(readcount_path, meta, suffix)
-  cat(paste0("Detected strand - ", names(star_column), ". Reading STAR column ", star_column, ".\n"))
+  strand <- names(star_column)
+  msg <- str_glue("Detected strand - {strand}. Reading STAR column {star_column}.")
+  message(msg)
   
-  set <- parse_star_counts(readcount_path, meta, star_column, suffix, fix_names_fun) |> 
+  parse_star_counts(readcount_path, meta, star_column, suffix, fix_names_fun) |> 
     add_star_log(starmap_path, meta) |> 
     add_gene_names(gene_info) |> 
     normalize_star_counts(gene_info) |> 
     filter_star_min_count(min_count)
-
-  return(set)
 }
 
+#' Add STAR Log Information
+#'
+#' Adds log information from STAR alignment to the dataset.
+#'
+#' @param set A dataset to which the STAR log information will be added.
+#' @param path Path to the directory containing STAR log files.
+#' @param meta Metadata dataframe for the samples.
+#' @return The dataset with added STAR log information.
 add_star_log <- function(set, path, meta) {
   set$star_log <- parse_star_logs(path, meta)
   return(set)
 }
 
+#' Parse a Single STAR Log File
+#'
+#' Reads and parses a single STAR log file, extracting key-value pairs of log
+#' information.
+#'
+#' @param file Path to a STAR log file.
+#' @param smpl Sample name associated with the log file.
+#' @return A tibble with the parsed log information, or NULL if the file does
+#'   not exist.
 parse_one_star_log <- function(file, smpl) {
   if (!file.exists(file)) {
     warning(paste("File", file, "not found"))
@@ -42,7 +71,14 @@ parse_one_star_log <- function(file, smpl) {
     mutate(raw_sample = smpl)
 }
 
-# parse all star logs
+#' Parse All STAR Log Files
+#'
+#' Reads and parses all STAR log files specified in the metadata, combining them
+#' into a single dataframe.
+#'
+#' @param path Path to the directory containing all STAR log files.
+#' @param meta Metadata data frame for the samples.
+#' @return A data frame with all parsed STAR log information.
 parse_star_logs <- function(path, meta) {
   s2n <- set_names(meta$sample, meta$raw_sample)
   meta$raw_sample |> 
@@ -59,6 +95,15 @@ tabulate_star_log <- function(slog) {
     rename(Description = key) 
 }
 
+#' Parse a Single STAR Count File
+#'
+#' Reads a single STAR count file, extracting gene counts for a specific sample.
+#'
+#' @param file Path to a STAR count file.
+#' @param smpl Sample name associated with the count file.
+#' @param column (Optional) The column number to extract counts from, defaults to 2.
+#' @param fix_names_fun (Optional) A function to fix gene names, defaults to NULL.
+#' @return A data frame with gene counts for the specified sample.
 parse_one_star_count <- function(file, smpl, column = 2, fix_names_fun = NULL) {
   if (!file.exists(file)) {
     warning(str_glue("File {file} not found."))
@@ -74,7 +119,21 @@ parse_one_star_count <- function(file, smpl, column = 2, fix_names_fun = NULL) {
   d
 }
 
-# Parse all star count files. Returns a list of tab (wide matrix) and dat (long tibble).
+#' Parse All STAR Count Files
+#'
+#' Parses all STAR count files specified in the metadata, combining them into a
+#' comprehensive dataset that includes wide matrix and long tibble formats,
+#' along with sample metadata and selected gene identifiers.
+#'
+#' @param path Path to the directory containing STAR count files.
+#' @param meta Metadata data frame for the samples, including sample names and
+#'   raw sample identifiers.
+#' @param column (Optional) Column number to extract counts from, defaults to 2.
+#' @param suffix (Optional) Suffix for the count files, defaults to ".txt".
+#' @param fix_names_fun (Optional) Function to correct gene names, defaults to
+#'   NULL.
+#' @return A list containing the data in both tab (wide matrix) and dat (long
+#'   tibble) formats, along with metadata and selected row identifiers.
 parse_star_counts <- function(path, meta, column = 2, suffix = ".txt", fix_names_fun) {
   s2n <- set_names(meta$sample, meta$raw_sample)
   dat <- meta$raw_sample |> 
@@ -94,7 +153,14 @@ parse_star_counts <- function(path, meta, column = 2, suffix = ".txt", fix_names
   list(dat = dat, tab = tab, metadata = meta, sel = rownames(tab))
 }
 
-
+#' Add Gene Names to Dataset
+#'
+#' Adds human-readable gene names to the dataset based on gene identifiers.
+#'
+#' @param set A dataset to which gene names will be added.
+#' @param gene_info Data frame containing gene identifiers and their
+#'   corresponding symbols.
+#' @return The dataset with added gene symbols.
 add_gene_names <- function(set, gene_info) {
   set$genes <- tibble(gene_id = rownames(set$tab)) |> 
     left_join(gene_info |> select(gene_id, gene_symbol) |> distinct(), by = "gene_id") |> 
@@ -102,7 +168,17 @@ add_gene_names <- function(set, gene_info) {
   set
 }
 
-# used in normalise_to_library
+#' Normalize Counts to Library Size
+#'
+#' Calculates normalization factors based on library sizes and applies them to
+#' count data.
+#'
+#' @param set A dataset containing count data.
+#' @param libsize (Optional) A pre-computed library size vector, defaults to
+#'   NULL, in which case the library size is calculated from the data.
+#' @return A list containing normalization factors and size factors for further
+#'   adjustments.
+#' @examples
 normalise_to_size <- function(set, libsize = NULL) {
   if (is.null(libsize)) {
     libsize <- set$dat |> 
@@ -121,7 +197,16 @@ normalise_to_size <- function(set, libsize = NULL) {
   
 }
 
-# normalize to library size and RPKM
+#' Normalize Dataset to Library Size and RPKM
+#'
+#' Applies library size normalization and calculates RPKM (Reads Per Kilobase
+#' Million) for the dataset.
+#'
+#' @param set A dataset containing count data and gene information.
+#' @param gene_info Data frame containing gene length information.
+#' @param input_size A data frame or vector specifying the input library sizes
+#'   for normalization.
+#' @return The dataset with normalized count data and RPKM values.
 normalise_to_library <- function(set, gene_info, input_size) {
   
   len_fac = set_names(gene_info$length / 1e3, gene_info$gene_id)
@@ -146,7 +231,13 @@ normalise_to_library <- function(set, gene_info, input_size) {
   return(set)
 }
 
-
+#' Normalize Counts Using edgeR
+#'
+#' Applies TMM (Trimmed Mean of M-values) normalization from the edgeR package
+#' to the count data.
+#'
+#' @param set A dataset containing count data.
+#' @return The dataset with TMM-normalized count data.
 normalise_edger <- function(set) {
   ed <- edgeR::DGEList(set$tab) |> 
     edgeR::calcNormFactors() |> 
@@ -166,7 +257,14 @@ normalise_edger <- function(set) {
   return(set)
 }
 
-# regularised log from DESeq2 (originally log2, we convert to log10)
+#' Apply Regularized Logarithm Transformation
+#'
+#' Transforms count data using the regularized log transformation from the
+#' DESeq2 package, converting to log10 scale.
+#'
+#' @param set A dataset containing count data.
+#' @return The dataset with count data transformed using the regularized log
+#'   transformation.
 regularised_log <- function(set) {
   rdat <- DESeq2::rlog(set$tab) |> 
     as_tibble(rownames = "gene_id") |>
@@ -182,7 +280,17 @@ regularised_log <- function(set) {
 }
 
 
-# edit: added DESeq2's regularised logarithm
+#' Normalize STAR Counts and Apply Transformations
+#'
+#' Normalizes STAR counts, applies library size and RPKM normalizations, and
+#' adds regularized logarithm transformations. This function wraps several
+#' normalization steps into one for convenience.
+#'
+#' @param set A dataset containing count data and STAR log information.
+#' @param gene_info Data frame containing gene information, including lengths for
+#'   RPKM calculation.
+#' @return The dataset after applying all normalization and transformation
+#'   steps.
 normalize_star_counts <- function(set, gene_info) {
   libsize <- set$star_log |> 
     filter(key == "Number of input reads") |> 
@@ -235,7 +343,23 @@ normalize_to_condition <- function(set, ref_cond, min_count = 10) {
   set
 }
 
-
+#' Plot STAR Log Statistics
+#'
+#' Generates plots for selected statistics from STAR log files, such as the
+#' number of input reads and percentages of uniquely mapped reads, across
+#' different samples and conditions or groups.
+#'
+#' @param slog A data frame containing STAR log statistics for multiple samples.
+#' @param meta Metadata data frame for the samples, must include sample names and
+#'   group or condition variables.
+#' @param group_var (Optional) The name of the variable in `meta` that defines
+#'   the grouping of samples, defaults to "condition".
+#' @param descs (Optional) A character vector specifying which statistics from
+#'   the STAR log to plot. Commonly includes "Number of input reads", "Uniquely
+#'   mapped reads %", and other mapping statistics. Defaults to a pre-defined
+#'   list of important metrics.
+#' @return A ggplot object visualizing the selected statistics from the STAR log
+#'   files, separated by the specified group variable and for each sample.
 plot_star_log <- function(slog, meta, group_var = "condition",
                         descs = c(
                           "Number of input reads",
@@ -300,6 +424,15 @@ plot_star_sense <- function(file) {
     geom_density(alpha = 0.3)
 }
 
+#' Summarize Column Counts from a STAR Output File
+#'
+#' Reads a STAR output file and summarizes counts for 'unstranded', 'first', and
+#' 'second' columns, filtering out genes with fewer than 10 'unstranded' counts.
+#'
+#' @param file Path to the STAR output file.
+#' @param smpl Sample name associated with the file.
+#' @return A dataframe summarizing the total counts for 'unstranded', 'first',
+#'   and 'second' columns, along with the sample name.
 star_col_count <- function(file, smpl) {
   read_tsv(file, skip = 4, col_names = c("gene", "unstranded", "first", "second"), col_types = cols()) |> 
     filter(unstranded > 10) |> 
@@ -307,6 +440,20 @@ star_col_count <- function(file, smpl) {
     mutate(raw_sample = smpl)
 }
 
+#' Determine Strand Specificity from STAR Outputs
+#'
+#' Analyzes STAR output files to determine the strand specificity of sequencing
+#' based on count proportions and a predefined limit.
+#'
+#' @param path Path to the directory containing STAR output files.
+#' @param meta Metadata data frame for the samples, including sample names and
+#'   raw sample identifiers.
+#' @param suffix (Optional) Suffix for the output files, defaults to ".txt".
+#' @param prop.limit (Optional) Proportion limit to determine strand
+#'   specificity, defaults to 0.8.
+#' @return The determined strand specificity as "first", "second", or
+#'   "unstranded". Will stop if multiple strand specificities are detected
+#'   across samples.
 star_strand <- function(path, meta, suffix = ".txt", prop.limit = 0.8) {
   s2n <- set_names(meta$sample, meta$raw_sample)
   m <- meta$raw_sample |> 
@@ -324,7 +471,13 @@ star_strand <- function(path, meta, suffix = ".txt", prop.limit = 0.8) {
   }
 }
 
-# wrapper around star_strand, returns STAR column
+#' Wrapper Around `star_strand` to Return STAR Column Number
+#'
+#' Determines the strand specificity using `star_strand` and maps it to the
+#' corresponding STAR output column number.
+#'
+#' @param ... Arguments passed on to the `star_strand` function.
+#' @return Column number corresponding to the determined strand specificity.
 star_strand_column <- function(...) {
   str2col <- set_names(
     c(3, 4, 2),
@@ -335,7 +488,16 @@ star_strand_column <- function(...) {
   str2col[strand]
 }
 
-# Select genes with at least min_count count in at least one sample
+#' Filter Genes Based on Minimum Count Threshold
+#'
+#' Filters genes based on a minimum count threshold in at least one sample,
+#' within the specified count column.
+#'
+#' @param set A dataset containing count data.
+#' @param min_count (Optional) Minimum count threshold, defaults to 10.
+#' @param count_column (Optional) The count column to apply the threshold to,
+#'   defaults to "count_norm".
+#' @return The dataset filtered based on the minimum count threshold.
 filter_star_min_count <- function(set, min_count = 10, count_column = "count_norm"){
   set$dat <- set$dat |> 
     group_by(gene_id) |> 
@@ -350,7 +512,16 @@ filter_star_min_count <- function(set, min_count = 10, count_column = "count_nor
   set  
 }
 
-
+#' Filter Samples Based on Expression Criteria
+#'
+#' Filters samples from the dataset based on specified expression criteria.
+#'
+#' @param set A dataset containing count data and sample metadata.
+#' @param expr An expression to evaluate for filtering samples.
+#' @return The dataset filtered based on the expression criteria.
+#' @examples
+#' # Assuming `set` contains your dataset and `expr` is your criteria.
+#' filtered_set <- filter_star_samples(set, "condition == 'treated'")
 filter_star_samples <- function(set, expr) {
   meta <- set$metadata |> 
     filter(eval(rlang::parse_expr(expr))) |> 
@@ -364,8 +535,16 @@ filter_star_samples <- function(set, expr) {
   set
 }
 
-# returns genes with zero in at least one group
-# gene_id and sum of counts per group in each group
+#' Find Genes with Zero Counts in Any Group
+#'
+#' Identifies genes with zero counts in at least one group and summarizes counts
+#' per group for each gene.
+#'
+#' @param set A dataset containing count data and metadata.
+#' @param group_var (Optional) The variable name in metadata to define groups,
+#'   defaults to "group".
+#' @return A wide-format dataframe with gene IDs, and their sum of counts per
+#'   group, highlighting genes with zero counts in any group.
 find_zeroes <- function(set, group_var = "group") {
   set$dat |>
     left_join(set$metadata, by = c("sample", "raw_sample")) |>
@@ -462,7 +641,19 @@ despike <- function(set) {
   set
 }
 
-
+#' Plot Mapped Count and Percentages for Samples
+#'
+#' Visualizes the number of input reads, uniquely mapped reads, and reads
+#' counted in genes for each sample in a dataset. It presents data in both
+#' absolute counts (millions) and percentages to give a comprehensive view of
+#' sequencing and mapping efficiency.
+#'
+#' @param set A dataset containing sequencing and mapping information. The
+#'   dataset must have `$tab` for count data and `$star_log` for log
+#'   information, including the number of input reads and uniquely mapped reads.
+#' @return A ggplot object that displays the mapped count and percentages for
+#'   samples. The visualization includes separate facets for absolute counts and
+#'   percentages, facilitating easy comparison and interpretation.
 plot_mapped_count <- function(set) {
   sm <- colSums(set$tab)
   cnt <- tibble(
@@ -603,6 +794,32 @@ mat2dat <- function(tab, to_what = "abu_norm", names = "sample", id_var = "gene_
     pivot_longer(-{{ id_var }}, names_to = names, values_to = to_what)
 }
 
+
+
+#' Remove Batch Effects from Dataset
+#'
+#' Applies batch effect correction to the expression data in the dataset using
+#' the limma method from the HarmonizR package. It's designed to adjust for
+#' systematic differences between batches that might skew the analysis results.
+#'
+#' @param set A list containing the dataset to be adjusted, including `$dat` for
+#'   expression data, `$metadata` for sample metadata, and optionally, other
+#'   elements used in downstream analyses.
+#' @param what The name of the column in `$dat` containing the expression values
+#'   to be adjusted.
+#' @param names The name of the column in `$metadata` representing the sample
+#'   identifiers.
+#' @param id_var The name of the column in `$dat` representing gene identifiers.
+#' @param batch_var The name of the column in `$metadata` representing batch
+#'   identifiers.
+#' @param formula A formula specifying the model to adjust for batch effects,
+#'   typically including the condition of interest and the batch.
+#' @param filt A logical expression as a character string to filter the metadata
+#'   for samples to be included in the adjustment process.
+#' @return The modified dataset with batch effects removed from the specified
+#'   expression column. The function adds the corrected expression values as a
+#'   new column in `$dat` and updates `$metadata` to include only the samples
+#'   that were included in the adjustment.
 remove_batch_effects <- function(set, what = "count_norm", names = "sample", id_var = "gene_id",
                                  batch_var = "day", formula = "~ condition + day",
                                  filt = "TRUE") {
