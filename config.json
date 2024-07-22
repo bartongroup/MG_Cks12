@@ -10,6 +10,7 @@
     "bedgraph" : "bedgraph",
     "qc" : "qc" 
   },
+  "metadata_file" : "info/EK RNAseq sample info.xlsx",
   "sample_file" : "config/samples.txt",
   "species" : "human",
   "ensembl" : {

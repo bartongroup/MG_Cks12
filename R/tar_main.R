@@ -12,8 +12,8 @@ targets_main <- function() {
   )
   
   setup_experiment <- tar_plan(
-    config = jsonlite::read_json("config.json")
-    #metadata = make_metadata(SAMPLE_FILE)
+    config = jsonlite::read_json("config.json"),
+    metadata = make_metadata(config$metadata_file)
   )
   
   qc <- tar_plan(

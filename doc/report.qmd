@@ -7,6 +7,9 @@ author:
   - name: Tony Ly
     affiliations: MCDB
     note: PI
+  - name: Edward Kaye
+    affiliarions: MCDB
+    note: PhD student
 date: today
 date-format: "D MMMM YYYY"
 execute:

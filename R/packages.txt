@@ -1,4 +1,6 @@
 qs
+janitor
+readxl
 tidyverse
 biomaRt
 edgeR

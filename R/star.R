@@ -798,7 +798,7 @@ mat2dat <- function(tab, to_what = "abu_norm", names = "sample", id_var = "gene_
 
 #' Remove Batch Effects from Dataset
 #'
-#' Applies batch effect correction to the expression data in the dataset using
+#' Applies batch effect correction to the expression data in the dataset usingx
 #' the limma method from the HarmonizR package. It's designed to adjust for
 #' systematic differences between batches that might skew the analysis results.
 #'
