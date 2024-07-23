@@ -1,5 +1,4 @@
 info/*
-genome/*
 fastq_trimmed/*.txt
 fastq_clean/*.txt
 fscreen/*.txt
@@ -15,3 +14,4 @@ config/*
 *.sh
 spec-file.txt
 fastq_files.txt
+environment.txt

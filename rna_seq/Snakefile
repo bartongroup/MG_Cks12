@@ -4,11 +4,9 @@
 #
 ### To install from scratch
 #
-# Need older python for cutadapt compatibility:
-#
-# mamba create --name cks12 python=3.10
-# mamba activate cks12
-# mamba install snakemake fastqc multiqc samtools bedtools star trim-galore fastq-screen drmaa qualimap ribodetector
+# mamba create --name pim_riboseq
+# mamba activate pim_riboseq
+# mamba install snakemake=7.32.4 fastqc multiqc samtools bedtools star fastp fastq-screen drmaa qualimap ribodetector
 #
 ### To recreate the environment
 #
@@ -78,6 +76,7 @@ PAIRS = ['R1', 'R2']
 
 # Lists for rule all
 
+ENVIRONMENT = ['environment.txt', 'spec-file.txt']
 TRIM_COUNTS = expand('fastq_trimmed/{sample}_count.txt', sample = SAMPLES)
 CLEAN_COUNTS = expand('fastq_clean/{sample}_count.txt', sample = SAMPLES)
 QCS = expand('qc/{sample}_{pair}_fastqc.html', sample = SAMPLES, pair = PAIRS)
@@ -93,12 +92,23 @@ BEDGRAPHS = expand('bedgraph/{sample}.' + window_size + '.bedgraph', sample = SA
 ####################################################################
 
 rule all:
-    input: QCS + QMS + CHRSTATS + MULTIQC + COUNTS + BEDGRAPHS + TRIM_COUNTS + CLEAN_COUNTS
-
+    input: ENVIRONMENT + QCS + QMS + CHRSTATS + MULTIQC + COUNTS + BEDGRAPHS + TRIM_COUNTS + CLEAN_COUNTS
 
 ####################################################################
-# Trim adapter sequences. As input files do not follow {sample}-{pair} naming convention,
-# we cannot use {pair} wildcards here.
+# Save environment
+
+rule environment:
+    output:
+        table = 'environment.txt',
+        spec = 'spec-file.txt'
+    shell:
+       '''
+       mamba list > {output.table}
+       mamba list --explicit > {output.spec}
+       '''
+
+####################################################################
+# Trim adapter sequences.
 
 rule trim_adapters:
     input:
@@ -107,17 +117,16 @@ rule trim_adapters:
     output:
         R1 = 'fastq_trimmed/{sample}_R1.fastq.gz',
         R2 = 'fastq_trimmed/{sample}_R2.fastq.gz',
-        trim1 = 'fastq_trimmed/{sample}_R1_trimming_report.txt',
-        trim2 = 'fastq_trimmed/{sample}_R2_trimming_report.txt'
+        report = 'fastq_trimmed/{sample}_report.html'
     threads: 4
     shell:
         '''
         mkdir -p fastq_trimmed
-        trim_galore --cores {threads} --paired --output_dir $TMPDIR/fastq_trimmed {input.R1} {input.R2}
-        mv $TMPDIR/fastq_trimmed/{wildcards.sample}_R1_val_1.fq.gz {output.R1}
-        mv $TMPDIR/fastq_trimmed/{wildcards.sample}_R2_val_2.fq.gz {output.R2}
-        mv $TMPDIR/fastq_trimmed/{wildcards.sample}_R1.fastq.gz_trimming_report.txt {output.trim1}
-        mv $TMPDIR/fastq_trimmed/{wildcards.sample}_R2.fastq.gz_trimming_report.txt {output.trim2}
+        mkdir $TMPDIR/fastp
+        fastp -w {threads} -h $TMPDIR/fastp/fastp.html -g -i {input.R1} -I {input.R2} -o $TMPDIR/fastp/R1.gz -O $TMPDIR/fastp/R2.gz
+        mv $TMPDIR/fastp/R1.gz {output.R1}
+        mv $TMPDIR/fastp/R2.gz {output.R2}
+        mv $TMPDIR/fastp/fastp.html {output.report}
         '''
 
 ####################################################################
@@ -179,7 +188,7 @@ rule multiqc:
         qc = QCS,
         qm = QMS,
         star = expand('starmap/{sample}_Log.final.out', sample = SAMPLES),
-        trimmed = expand('fastq_trimmed/{sample}_{pair}_trimming_report.txt', sample = SAMPLES, pair = PAIRS)
+        trimmed = expand('fastq_trimmed/{sample}_report.html', sample = SAMPLES)
     output: 'multiqc/report.html'
     shell:
         'multiqc -f --filename report --outdir multiqc fastq_trimmed qc fscreen starmap qm/bamqc qm/rnaseq'
@@ -340,24 +349,13 @@ rule qualimap_rnaseq:
 
 
 ####################################################################
-# BED and bedGraph files
-
-rule bamtobed:
-    input: 'bam/{sample}.bam'
-    output: 'bed/{sample}.bed'
-    shell:
-        'bedtools bamtobed -i {input} | sort -k1,1 -k2,2n > {output}'
-
-rule bedwindow:
-    input: genome_size_file
-    output: window_file
-    shell:
-        'bedtools makewindows -w {window_size} -s {window_size} -g {input} | sort -k1,1 -k2,2n > {output}'
+# bedGraph files
 
 rule bedgraph:
     input:
-        bed = 'bed/{sample}.bed',
-        window = window_file
+        bam = 'bam/{sample}.bam',
+        bai = 'bam/{sample}.bam.bai'
     output: 'bedgraph/{sample}.' + window_size + '.bedgraph'
     shell:
-        'bedtools intersect -c -sorted -a {input.window} -b {input.bed} | sort -k1,1 -k2,2n > {output}'
+        'bamCoverage -b {input.bam} -o {output} --binSize {window_size} --outFileFormat bedgraph'
+

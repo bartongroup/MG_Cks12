@@ -25,7 +25,7 @@ plot_fscreen_map <- function(fscreen) {
     theme_bw() +
     theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 8)) +
     geom_tile() +
-    scale_fill_viridis(option = "cividis", trans = "log10", limits = c(0.01, 100), labels = c(0.01,0.1,1,10,100)) +
+    scale_fill_viridis_c(option = "cividis", trans = "log10", limits = c(0.01, 100), labels = c(0.01,0.1,1,10,100)) +
     labs(x = NULL, y = "Genome", fill = "% Unique hits")
 }
 
@@ -198,4 +198,8 @@ plot_chrom_proportion <- function(ids, chromosomes, per_length = TRUE) {
     labs(x = "Chromosome", y = ylab)
 }
 
+get_software_versions <- function(ver_file, selection) {
+  read_table(ver_file, col_names = c("name", "version", "hash", "source"), comment = "#", show_col_types = FALSE) |>
+    filter(name %in% selection)
+}
 

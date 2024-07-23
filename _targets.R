@@ -17,10 +17,6 @@ if (interactive()) sapply(required_packages, library, character.only = TRUE)
 files_R <- list.files(c("R", "targets"), pattern = "*.R$", full.names = TRUE)
 sr_ <- sapply(files_R, source)
 
-sesinfo <- list(
-  tar_target(session_info, sessionInfo())
-)
-
 # prevent other packages from stealing from tidyverse
 filter <- dplyr::filter
 rename <- dplyr::rename
@@ -28,14 +24,14 @@ select <- dplyr::select
 slice <- dplyr::slice
 count <- dplyr::count
 
-
 # Add session info
-sesinfo <- list(
-  tar_force(session_info, sessioninfo::session_info(to_file = "doc/session_info.txt"), force = TRUE)
+sessinfo <- list(
+  tar_force(session_info, sessioninfo::session_info(), force = TRUE)
 )
 
+
 c(
-  sesinfo,
+  sessinfo,
   targets_main()
 )
 

@@ -597,7 +597,7 @@ plot_cluster_qualities <- function(qc, text.size = 10) {
     panel.background = ggplot2::element_blank(),
     axis.text.y = ggplot2::element_text(size = text.size),
     axis.line.y = ggplot2::element_blank(),
-    axis.line.x = ggplot2::element_line(size = 0.5),
+    axis.line.x = ggplot2::element_line(linewidth = 0.5),
     axis.ticks.y = ggplot2::element_blank()
   )
   ggplot() +

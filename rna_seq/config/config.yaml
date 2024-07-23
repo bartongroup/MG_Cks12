@@ -5,7 +5,7 @@ fastq_screen_config: config/fastq_screen.conf
 read_length: 150
 
 reference:
-    release: 111
+    release: 112
     genome_path: homo_sapiens
     genome_name: Homo_sapiens.GRCh38
     genome_suffix: .dna.primary_assembly.fa

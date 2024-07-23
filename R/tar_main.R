@@ -1,18 +1,17 @@
 targets_main <- function() {
   
   get_annotations <- tar_plan(
-    mart = useEnsembl(biomart = "ensembl", dataset = config$ensembl_dataset, version = config$ensembl_version),
+    mart = new_mart(config),
     chromosomes = biomart_fetch_chromosomes(mart),
     gns = biomart_fetch_genes(mart),
-    bm_gene_lengths = biomart_fetch_gene_lengths(mart, gns$gene_id),
-    bm_genes = gns |> left_join(select(bm_gene_lengths, -chr), by = "gene_id"),
-    terms = get_functional_terms(mart, bm_genes, species = config$species)
+    terms = get_functional_terms(config, gns)
     #gterms = prepare_terms_gsea(terms, star$genes$gene_id),
     #fterms = prepare_terms_fenr(terms, star$genes$gene_id)
   )
   
   setup_experiment <- tar_plan(
-    config = jsonlite::read_json("config.json"),
+    tar_target(config_file, "config.json", format = "file"),
+    config = jsonlite::read_json(config_file),
     metadata = make_metadata(config$metadata_file)
   )
   
@@ -27,7 +26,6 @@ targets_main <- function() {
     scaffolds = idxstats |> filter(count > 1000 & !(chr %in%  chromosomes)) |> pull(chr) |> unique(),
     
     fig_fscreen = plot_fscreen_map(fscrn),
-    fig_mouse_rat = plot_mouse_rat(fscrn),
     fig_read_qual = plot_qualities(qcs),
     fig_read_qual_clust = plot_cluster_qualities(qcs),
     fig_chrom_proportion = plot_chrom_proportion(idxstats, chromosomes, per_length = TRUE),
@@ -53,9 +51,21 @@ targets_main <- function() {
     example_count_file = one_count_file(config, metadata, 1),
     fig_star_sense = plot_star_sense(example_count_file)
   )
+
+  get_environment <- tar_plan(
+    tar_target(version_file, file.path(config$data_path, "environment.txt"), format = "file"),
+    software_versions = get_software_versions(
+      version_file,
+      selection = c("fastqc", "fastq-screen", "fastp", "ribodetector", "multiqc", "star", "samtools", "bedtools", "snakemake", "drmaa")
+    )
+  )
+
   
   c(
     get_annotations,
-    setup_experiment
+    setup_experiment,
+    get_environment,
+    qc,
+    star
   )
 }

@@ -67,7 +67,7 @@ fetch_bp <- function(use_cache = TRUE) {
 #' data(exmpl_all)
 #' bp <- fetch_bp()
 #' bp_terms <- prepare_for_enrichment(bp$terms, bp$mapping, exmpl_all, feature_name = "gene_symbol")
-prepare_for_gsea <- function(terms, mapping, all_features = NULL, feature_name = "gene_id") {
+prepare_for_gsea <- function(terms, mapping, all_features = NULL, feature_name = "id") {
   # Binding variables from non-standard evaluation locally
   feature_id <- term_id <- NULL
   
@@ -134,7 +134,7 @@ prepare_for_gsea <- function(terms, mapping, all_features = NULL, feature_name =
 }
 
 
-get_functional_terms <- function(mart, geneids, species) {
+get_functional_terms <- function(config, geneids) {
   SPECIES <- list(
     human = list(
       go = "goa_human",
@@ -151,46 +151,47 @@ get_functional_terms <- function(mart, geneids, species) {
       go = "rgd",
       re = "Rattus norvegicus",
       kg = "rno"
+    ),
+    mouse = list(
+      go = "mgi",
+      re = "Mus musculus",
+      kg = "mmu"
     )
   )
   
   geneids <- geneids |> 
-    select(gene_id, gene_symbol) |> 
+    select(id, gene_symbol) |> 
     distinct()
-  
-  sp <- SPECIES[[species]]
+
+  sp <- SPECIES[[config$species]]
   cat("Loading GO term data\n")
-  go <- fenr::fetch_go(mart = mart)
+  go <- fenr::fetch_go(dataset = config$ensembl$dataset)
   cat("Loading Reactome data\n")
   re <- fenr::fetch_reactome(sp$re)
   cat("Loading KEGG data\n")
   kg <- fenr::fetch_kegg(sp$kg)
   cat("Loading BioPlanet data\n")
   bp <- fetch_bp()
-  cat("Loading WikiPathways data\n")
-  wi <- fenr::fetch_wiki(sp$wi)
-
-  geneids <- geneids |> 
-    select(gene_id, gene_symbol) |> 
-    distinct()
   
+  go$terms <- go$terms |> 
+    filter(namespace == "biological_process")
   go$mapping <- go$mapping |> 
-    rename(gene_id = ensembl_gene_id)
+    drop_na() |> 
+    rename(id = gene_id) |> 
+    filter(term_id %in% go$terms$term_id)
+  re$mapping <- re$mapping |> 
+    rename(id = gene_id)
   kg$mapping <- kg$mapping |> 
     select(-gene_id) |> 
     left_join(geneids, by = "gene_symbol", relationship = "many-to-many")
   bp$mapping <- bp$mapping |>
-    left_join(geneids, by = "gene_symbol", relationship = "many-to-many")
-  wi$mapping <- wi$mapping |> 
-    rename(gene_symbol = text_label) |> 
     left_join(geneids, by = "gene_symbol", relationship = "many-to-many")
 
   list(
     go = go,
     re = re,
     kg = kg,
-    bp = bp,
-    wi = wi
+    bp = bp
   )
 }
 
@@ -199,6 +200,7 @@ prepare_terms_gsea <- function(terms, all_features) {
   
   map(ontologies, function(ont) {
     trm <- terms[[ont]]
+    print(ont)
     prepare_for_gsea(trm$terms, trm$mapping, all_features)
   }) |> 
     set_names(ontologies)
@@ -209,7 +211,7 @@ prepare_terms_fenr <- function(terms, all_features) {
   
   map(ontologies, function(ont) {
     trm <- terms[[ont]]
-    fenr::prepare_for_enrichment(trm$terms, trm$mapping, all_features)
+    fenr::prepare_for_enrichment(trm$terms, trm$mapping, all_features, feature_name = "id")
   }) |> 
     set_names(ontologies)
 }

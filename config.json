@@ -14,8 +14,9 @@
   "sample_file" : "config/samples.txt",
   "species" : "human",
   "ensembl" : {
+    "biomart" : "ENSEMBL_MART_ENSEMBL",
     "dataset" : "hsapiens_gene_ensembl",
-    "version" : "111"
+    "version" : "112"
   },
   "logfc_limit" : 1,
   "fdr_limit" : 0.01
