@@ -1,14 +1,15 @@
-top_expressed_genes <- function(set, gns, n_top = 10) {
+top_expressed_genes <- function(set, gns, group_var = "treatment", n_top = 10) {
   genes <- gns |> 
-    select(chr, start, end, gene_id, gene_symbol, description) |> 
+    select(chr, start, end, id, gene_symbol, description) |> 
     distinct()
   
-  mn <- star_mean_expr(set, what = "count_norm")
+  mn <- star_mean_expr(set, what = "count_norm", group_var = group_var)
   mn |> 
     arrange(-M) |> 
-    group_split(condition) |> 
+    mutate(group = get(group_var)) |> 
+    group_split(group) |> 
     map_dfr(\(w) head(w, n_top)) |> 
-    left_join(genes, by = "gene_id")
+    left_join(genes, by = "id")
 }
 
 remove_mt <- function(set, gns) {
@@ -39,21 +40,6 @@ read_fastq_lengths <- function(config, meta) {
 }
 
 
-plot_ribo_proportion <- function(fl) {
-  fl |> 
-    pivot_wider(id_cols = sample, names_from = type, values_from = read_count) |> 
-    mutate(prop = 1 - Clean / Trimmed) |> 
-  ggplot(aes(x = sample, y = prop)) +
-    theme_bw() +
-    theme(
-      panel.grid = element_blank(),
-      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
-    ) +
-    geom_col() +
-    scale_y_continuous(expand = expansion(mult = c(0, 0.03))) +
-    labs(x = NULL, y = "Ribosomal proportion")
-}
-
 
 
 make_upset_contrasts <- function(de) {
@@ -74,110 +60,23 @@ make_upset <- function(edger_rest, edger_full, edger_cond) {
   )
 }
 
-
-
-get_clock_genes <- function(cl_file) {
-  readxl::read_excel(cl_file) |> 
-    janitor::clean_names() |> 
-    select(gene_symbol = gene_name, class) |> 
-    mutate(gene_symbol = case_match(
-      gene_symbol,
-      "KIAA0922" ~ "TMEM131L",
-      "FAM122A" ~ "PABIR1",
-      .default = gene_symbol
-    )) |> 
-    mutate(class = tolower(class) |> fct_relevel("phase", "anti-phase", "phase (ambiguous)"))
-}
-
-
-plot_significant_clock_genes <- function(de, clock_genes) {
-  d <- de |> 
-    filter(str_detect(contrast, "YTHDF")) |> 
-    mutate(contrast = str_remove(contrast, "condition")) |> 
-    inner_join(clock_genes, by = join_by(gene_id, gene_symbol)) |> 
-    select(gene_symbol, logFC, logCPM, PValue, FDR, contrast, class, sig) |> 
-    group_by(gene_symbol) |> 
-    mutate(
-      any_sig = any(sig),
-      mean_logFC = mean(logFC)
-    ) |> 
+# Minimum count per sample in each experiment
+filter_per_experiment <- function(set, min_count) {
+  md <- set$metadata |> 
+    select(sample, experiment)
+  set$dat <- set$dat |> 
+    left_join(md, by = join_by(sample))  |> 
+    group_by(id, experiment) |> 
+    mutate(bad = max(count) < min_count)  |> 
     ungroup() |> 
-    filter(any_sig)
-  
-  mx <- max(abs(d$logFC))
-    
-  classes <- levels(d$class)
-  sizes <- d |> arrange(class) |> dplyr::count(class) |> pull(n)
-  pl <- map(classes, function(cl) {
-    d |>
-      filter(class == cl) |> 
-      ggplot(aes(x = logFC, y = fct_reorder(gene_symbol, mean_logFC), fill = sig)) +
-      th +
-      theme(legend.position = "none") +
-      geom_col() +
-      scale_x_continuous(limits = c(-mx, mx)) +
-      scale_fill_manual(values = c("grey70", "black")) +
-      facet_wrap(~ contrast, nrow = 1) +
-      labs(x = expression(log[2]~FC), y = NULL, title = cl)
-  })
-  plot_grid(plotlist = pl, ncol = 1, align = "v", rel_heights = sizes + 25)
-
-}
-
-
-prepare_clock_genes_for_gsea <- function(clock_genes) {
-  mapping <- clock_genes |> 
-    select(gene_id, term_id = class)
-  terms <- clock_genes |> 
-    select(term_id = class) |> 
-    distinct() |> 
-    mutate(term_name = term_id)
-  list(
-    clock = prepare_for_gsea(terms, mapping)
-  )
-}
-
-de_clock_genes <- function(de, clock_genes) {
-  de |> 
-    filter(contrast %in% c("conditionYTHDF1", "conditionYTHDF2")) |> 
-    mutate(contrast = str_remove(contrast, "condition")) |> 
-    inner_join(clock_genes, by = join_by(gene_id, gene_symbol)) |> 
-    select(gene_id, logFC, logCPM, PValue, FDR, contrast, class, sig) |> 
-    group_by(gene_id) |> 
-    mutate(
-      any_sig = any(sig),
-      mean_logFC = mean(logFC)
-    ) |> 
+    group_by(id) |> 
+    mutate(bad = any(bad)) |> 
     ungroup() |> 
-    filter(any_sig) |> 
-    select(gene_id, class, mean_logFC) |> 
-    distinct() |> 
-    arrange(class, -mean_logFC)
-}
-
-
-plot_volcano_clock <- function(de, clock_genes) {
-  d <- de |> 
-    filter(str_detect(contrast, "condition")) |> 
-    left_join(clock_genes, by = join_by(gene_symbol, gene_id)) |> 
-    mutate(
-      contrast = str_remove(contrast, "condition"),
-      sel = !is.na(class)
-    )
-    
-  classes <- levels(clock_genes$class)
-  pl <- map(classes, function(cl) {
-    d_sel <- d |> filter(class == cl)
-    
-    ggplot(mapping = aes(x = logFC, y = -log10(PValue))) +
-      th +
-      geom_point(data = d, colour = "grey80", size = 0.6, alpha = 0.3) +
-      geom_point(data = d_sel, colour = "black", size = 1.3) +
-      scale_y_continuous(expand = expansion(mult = c(0, 0.03))) +
-      geom_vline(xintercept = 0, linewidth = 0.1, alpha = 0.5) +
-      facet_wrap( ~ contrast) +
-      labs(x = expression(log[2]~FC), y = expression(-log[10]~P), title = cl)
-  })
+    select(-experiment)
+  set$sel <- set$dat |> 
+    filter(!bad) |> 
+    pull(id) |> 
+    unique()
   
-  plot_grid(plotlist = pl, ncol = 1, align = "v")
+    set  
 }

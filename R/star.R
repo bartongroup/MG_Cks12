@@ -111,10 +111,10 @@ parse_one_star_count <- function(file, smpl, column = 2, fix_names_fun = NULL) {
   }
   d <- read_tsv(file, col_names = FALSE, skip = 4, col_types = "ciii") |> 
     select(1, all_of(column)) |> 
-    set_names("gene_id", "count") |> 
-    add_column(raw_sample = smpl, .after = "gene_id")
+    set_names("id", "count") |> 
+    add_column(raw_sample = smpl, .after = "id")
   if (!is.null(fix_names_fun)) {
-    d <- d |> mutate(gene_id = fix_names_fun(gene_id))
+    d <- d |> mutate(id = fix_names_fun(id))
   }
   d
 }
@@ -140,16 +140,14 @@ parse_star_counts <- function(path, meta, column = 2, suffix = ".txt", fix_names
     map(~parse_one_star_count(file.path(path, paste0(.x, suffix)), .x, column, fix_names_fun)) |> 
     list_rbind() |> 
     mutate(sample = as.character(s2n[raw_sample])) |> 
-    group_by(gene_id) |>
+    group_by(id) |>
     mutate(gene_count = sum(count)) |>
     ungroup() |>
     filter(gene_count > 0) |>
-    select(gene_id, sample, count) |> 
+    select(id, sample, count) |> 
     mutate(sample = factor(sample, levels = meta$sample))
   tab <- dat |> 
-    pivot_wider(id_cols = "gene_id", names_from = "sample", values_from = "count") |> 
-    column_to_rownames("gene_id") |> 
-    as.matrix()
+    dat2mat(what = "count", id_col = "id", sample_var = "sample")
   list(dat = dat, tab = tab, metadata = meta, sel = rownames(tab))
 }
 
@@ -162,9 +160,9 @@ parse_star_counts <- function(path, meta, column = 2, suffix = ".txt", fix_names
 #'   corresponding symbols.
 #' @return The dataset with added gene symbols.
 add_gene_names <- function(set, gene_info) {
-  set$genes <- tibble(gene_id = rownames(set$tab)) |> 
-    left_join(gene_info |> select(gene_id, gene_symbol) |> distinct(), by = "gene_id") |> 
-    mutate(gene_symbol = if_else(is.na(gene_symbol), gene_id, gene_symbol))
+  set$genes <- tibble(id = rownames(set$tab)) |> 
+    left_join(gene_info |> select(id, gene_symbol, description) |> distinct(), by = "id") |> 
+    mutate(gene_symbol = if_else(is.na(gene_symbol), id, gene_symbol))
   set
 }
 
@@ -209,7 +207,7 @@ normalise_to_size <- function(set, libsize = NULL) {
 #' @return The dataset with normalized count data and RPKM values.
 normalise_to_library <- function(set, gene_info, input_size) {
   
-  len_fac = set_names(gene_info$length / 1e3, gene_info$gene_id)
+  # len_fac = set_names(gene_info$length / 1e3, gene_info$id)
   
   # normalised to total mapped and counted reads
   mapped <- normalise_to_size(set)
@@ -219,10 +217,10 @@ normalise_to_library <- function(set, gene_info, input_size) {
   
   set$dat <- set$dat |> 
     mutate(
-      count_norm = count / mapped$norm_fac[sample] |> unname(),
-      rpkm = (count + 1) / (mapped$size_fac[sample] * len_fac[gene_id] |> unname())
+      count_norm = count / mapped$norm_fac[sample] |> unname()
+      #rpkm = (count + 1) / (mapped$size_fac[sample] * len_fac[id] |> unname())
       #count_inputnorm = count / input$norm_fac[sample] |> unname,
-      #rpkm_inputnorm = (count + 1) / (input$size_fac[sample] * len_fac[gene_id] |> unname),
+      #rpkm_inputnorm = (count + 1) / (input$size_fac[sample] * len_fac[id] |> unname),
     )
   
   set$mapped_normfac <- mapped$normfac_tab
@@ -267,14 +265,14 @@ normalise_edger <- function(set) {
 #'   transformation.
 regularised_log <- function(set) {
   rdat <- DESeq2::rlog(set$tab) |> 
-    as_tibble(rownames = "gene_id") |>
-    pivot_longer(-gene_id, names_to = "sample", values_to = "rlog") |> 
+    as_tibble(rownames = "id") |>
+    pivot_longer(-id, names_to = "sample", values_to = "rlog") |> 
     mutate(
       rlog = rlog / log2(10),
       sample = factor(sample, levels = set$metadata$sample)
     )
   set$dat <- set$dat |> 
-    left_join(rdat, by = c("gene_id", "sample"))
+    left_join(rdat, by = c("id", "sample"))
  
   return(set) 
 }
@@ -309,36 +307,36 @@ normalize_to_condition <- function(set, ref_cond, min_count = 10) {
   sel_genes <- set$dat |> 
     left_join(set$metadata, by = "sample") |> 
     filter(condition == ref_cond) |> 
-    group_by(gene_id) |> 
+    group_by(id) |> 
     summarise(m = min(count)) |> 
     filter(m >= min_count) |> 
-    pull(gene_id)
+    pull(id)
   
   d <- set$dat |> 
-    filter(gene_id %in% sel_genes)
+    filter(id %in% sel_genes)
   
   nrm <- set$metadata |> 
     filter(condition == ref_cond) |> 
     select(sample, replicate) |> 
     left_join(d, by = "sample") |> 
-    select(gene_id, replicate, ref = count_norm)
+    select(id, replicate, ref = count_norm)
   
   lr <- d |> 
     left_join(set$metadata |> select(sample, replicate, condition), by = "sample") |> 
     filter(condition != ref_cond) |> 
     droplevels() |> 
-    left_join(nrm, by = c("gene_id", "replicate")) |> 
+    left_join(nrm, by = c("id", "replicate")) |> 
     mutate(logratio = log2((count_norm + 0.5) / ref)) |> 
-    select(gene_id, sample, logratio) |> 
-    set_names("gene_id", "sample", str_c("logratio_", ref_cond))
+    select(id, sample, logratio) |> 
+    set_names("id", "sample", str_c("logratio_", ref_cond))
   
   set$metadata <- set$metadata |> 
     filter(condition != ref_cond) |> 
     droplevels()
   set$dat <- d |> 
-    right_join(lr, by = c("gene_id", "sample")) |> 
+    right_join(lr, by = c("id", "sample")) |> 
     droplevels()
-  set$sel <- set$dat$gene_id |> unique()
+  set$sel <- set$dat$id |> unique()
   
   set
 }
@@ -349,9 +347,7 @@ normalize_to_condition <- function(set, ref_cond, min_count = 10) {
 #' number of input reads and percentages of uniquely mapped reads, across
 #' different samples and conditions or groups.
 #'
-#' @param slog A data frame containing STAR log statistics for multiple samples.
-#' @param meta Metadata data frame for the samples, must include sample names and
-#'   group or condition variables.
+#' @param set A dataset containing count data and STAR log information.
 #' @param group_var (Optional) The name of the variable in `meta` that defines
 #'   the grouping of samples, defaults to "condition".
 #' @param descs (Optional) A character vector specifying which statistics from
@@ -360,7 +356,7 @@ normalize_to_condition <- function(set, ref_cond, min_count = 10) {
 #'   list of important metrics.
 #' @return A ggplot object visualizing the selected statistics from the STAR log
 #'   files, separated by the specified group variable and for each sample.
-plot_star_log <- function(slog, meta, group_var = "condition",
+plot_star_log <- function(set, group_var = "condition",
                         descs = c(
                           "Number of input reads",
                           "Uniquely mapped reads %",
@@ -368,50 +364,59 @@ plot_star_log <- function(slog, meta, group_var = "condition",
                           "% of reads mapped to too many loci",
                           "% of reads unmapped: too short")
                         ) {
-  s <- slog |> 
+  env <- new.env(parent = globalenv())
+  env$meta <- set$metadata
+  
+  env$s <- set$star_log |> 
     filter(key %in% descs) |>
     mutate(value = str_remove(value, "%") |> as.numeric()) |> 
     mutate(key = factor(key, levels = descs)) |> 
     select(-raw_sample) |> 
-    left_join(meta, by = "sample") |> 
+    left_join(set$metadata, by = "sample") |> 
     mutate(group = get(group_var)) |> 
     mutate(value = if_else(key ==  "Number of input reads", value / 1e6, value)) |> 
     mutate(key = recode(key,  "Number of input reads" =  "Number of input reads (millions)",))
-  su <- s |> 
+  env$su <- env$s |> 
     filter(key == "Uniquely mapped reads %") |> 
     arrange(value)
   
-  s |> 
-    mutate(sample = factor(sample, levels = meta$sample)) |> 
-  ggplot(aes(x = sample, y = value, fill = group)) +
-    theme_bw() +
-    theme(
-      panel.grid = element_blank(),
-      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
-      legend.position = "none"
-    ) +
-    #geom_segment(aes(xend = sample, yend = 0), colour = "grey70") +
-    geom_col(colour = "grey30") +
-    facet_wrap(~key, scales = "free_y", ncol = 1) +
-    scale_y_continuous(expand = c(0, 0), labels = scientific_10) +
-    scale_fill_manual(values = okabe_ito_palette) +
-    geom_text(aes(y = value * 1.05, label = "")) + # blank geom to expand axis
-    labs(x = NULL, y = "Value")
+  with(env, {
+    s |> 
+      mutate(sample = factor(sample, levels = meta$sample)) |> 
+      ggplot(aes(x = sample, y = value, fill = group)) +
+      theme_bw() +
+      theme(
+        panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+        legend.position = "bottom"
+      ) +
+      #geom_segment(aes(xend = sample, yend = 0), colour = "grey70") +
+      geom_col(colour = "grey30") +
+      facet_wrap(~key, scales = "free_y", ncol = 1) +
+      scale_y_continuous(expand = c(0, 0), labels = scientific_10) +
+      scale_fill_manual(values = okabe_ito_palette) +
+      geom_text(aes(y = value * 1.05, label = "")) + # blank geom to expand axis
+      labs(x = NULL, y = "Value")
+  })
 }
 
-plot_star_log_map <- function(slog, meta) {
-  slog |> 
+plot_star_log_map <- function(set) {
+  env <- new.env(parent = globalenv())
+  
+  env$d <- set$star_log |> 
     filter(str_detect(key, "%")) |> 
     mutate(value = str_remove(value, "%") |> as.numeric()) |> 
     mutate(value = na_if(value, 0)) |> 
-    mutate(sample = factor(sample, levels = meta$sample)) |> 
-    mutate(Description = factor(key)) |> 
-  ggplot(aes(x = sample, y = Description, fill = value)) + 
-    theme_bw() +
-    geom_tile() +
-    scale_fill_viridis_c(option = "cividis", trans = "log10", limits = c(0.1, 100), breaks = c(0.1,1,10,100), labels = c(0.1,1,10,100)) +
-    theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 6)) +
-    labs(x = NULL, y = NULL, fill = "Percentage")
+    mutate(sample = factor(sample, levels = set$metadata$sample)) |> 
+    mutate(Description = factor(key))
+  with(env, {
+    ggplot(d, aes(x = sample, y = Description, fill = value)) + 
+      theme_bw() +
+      geom_tile() +
+      scale_fill_viridis_c(option = "cividis", trans = "log10", limits = c(0.1, 100), breaks = c(0.1,1,10,100), labels = c(0.1,1,10,100)) +
+      theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 6)) +
+      labs(x = NULL, y = NULL, fill = "Percentage")
+  })
 }
 
 
@@ -500,13 +505,13 @@ star_strand_column <- function(...) {
 #' @return The dataset filtered based on the minimum count threshold.
 filter_star_min_count <- function(set, min_count = 10, count_column = "count_norm"){
   set$dat <- set$dat |> 
-    group_by(gene_id) |> 
-    mutate(good = max(get(count_column)) >= min_count) |> 
+    group_by(id) |> 
+    mutate(bad = max(get(count_column)) < min_count) |> 
     ungroup()
     
   set$sel <- set$dat |> 
-    filter(good) |> 
-    pull(gene_id) |> 
+    filter(!bad) |> 
+    pull(id) |> 
     unique()
 
   set  
@@ -549,23 +554,23 @@ find_zeroes <- function(set, group_var = "group") {
   set$dat |>
     left_join(set$metadata, by = c("sample", "raw_sample")) |>
     mutate(group = get(group_var)) |> 
-    group_by(gene_id, group) |>
+    group_by(id, group) |>
     summarise(S = sum(count)) |>
     ungroup() |>
-    group_by(gene_id) |>
+    group_by(id) |>
     mutate(m = min(S)) |>
     ungroup() |>
     filter(m == 0) |> 
-    pivot_wider(id_cols = gene_id, names_from = group, values_from = S)
+    pivot_wider(id_cols = id, names_from = group, values_from = S)
 }
 
 
 merge_star_dat <- function(dat, meta, genes, columns = c("group", "replicate")) {
   dat |> 
     left_join(meta, by = "sample") |> 
-    left_join(genes, by = "gene_id") |> 
+    left_join(genes, by = "id") |> 
     mutate(gene_symbol = na_if(gene_symbol, "")) |> 
-    select(gene_id, gene_symbol, description, sample, all_of(columns), count, count_norm, rpkm)
+    select(id, gene_symbol, description, sample, all_of(columns), count, count_norm, rpkm)
 }
 
 
@@ -654,7 +659,7 @@ despike <- function(set) {
 #' @return A ggplot object that displays the mapped count and percentages for
 #'   samples. The visualization includes separate facets for absolute counts and
 #'   percentages, facilitating easy comparison and interpretation.
-plot_mapped_count <- function(set) {
+plot_mapped_count <- function(set, nrow = 1) {
   sm <- colSums(set$tab)
   cnt <- tibble(
     sample = names(sm),
@@ -724,22 +729,22 @@ plot_mapped_count <- function(set) {
     scale_colour_manual(values = okabe_ito_palette) +
     scale_x_discrete(labels = get_labels) +
     scale_y_continuous(expand = expansion(mult = c(0, 0.03))) +
-    facet_wrap(~ what, scales = "free") +
+    facet_wrap(~ what, scales = "free", nrow = nrow) +
     labs(x = NULL, y = "Read count (millions)", colour = "Legend")
 }
 
 
 select_strong_genes <- function(set, limit = 100) {
   set$dat |> 
-    select(gene_id, sample, count) |> 
+    select(id, sample, count) |> 
     left_join(set$metadata, by = "sample") |> 
-    group_by(gene_id, group) |> 
+    group_by(id, group) |> 
     summarise(min_group_count = min(count)) |> 
     ungroup() |> 
-    group_by(gene_id) |> 
+    group_by(id) |> 
     summarise(best_count = max(min_group_count)) |> 
     filter(best_count > limit) |> 
-    pull(gene_id) |> 
+    pull(id) |> 
     unique()
 }
 
@@ -747,10 +752,10 @@ select_strong_genes <- function(set, limit = 100) {
 save_count_data <- function(set, clock_genes, file, what = "count_norm") {
   set$dat |> 
     mutate(val = get(what)) |> 
-    left_join(set$genes, by = "gene_id") |> 
-    pivot_wider(id_cols = c(gene_id, gene_symbol), names_from = sample, values_from = val) |> 
+    left_join(set$genes, by = "id") |> 
+    pivot_wider(id_cols = c(id, gene_symbol), names_from = sample, values_from = val) |> 
     mutate(across(where(is.numeric), ~signif(.x, 4))) |> 
-    left_join(clock_genes |> select(-gene_symbol), by = "gene_id") |> 
+    left_join(clock_genes |> select(-gene_symbol), by = "id") |> 
     relocate(class, .after = "gene_symbol") |> 
     mutate(class = as.character(class)) |> 
     mutate(class = replace_na(class, "-")) |> 
@@ -758,7 +763,7 @@ save_count_data <- function(set, clock_genes, file, what = "count_norm") {
     write_tsv(file)
 }
 
-dat2mat <- function(dat, what = "count", id_col = "gene_id", sample_var = "sample") {
+dat2mat <- function(dat, what = "count", id_col = "id", sample_var = "sample") {
   dat |> 
     pivot_wider(id_cols = !!id_col, names_from = !!sample_var, values_from = !!what) |> 
     column_to_rownames(id_col) |> 
@@ -766,7 +771,7 @@ dat2mat <- function(dat, what = "count", id_col = "gene_id", sample_var = "sampl
 }
 
 
-star_mean_expr <- function(set, what = "count", id_var = "gene_id", group_var = "condition") {
+star_mean_expr <- function(set, what = "count", id_var = "id", group_var = "condition") {
   set$dat |> 
     left_join(set$metadata, by = "sample") |> 
     mutate(val = get(what), group = get(group_var), id = get(id_var)) |> 
@@ -787,7 +792,19 @@ read_fastq_length <- function(path, meta) {
   })
 }
 
-mat2dat <- function(tab, to_what = "abu_norm", names = "sample", id_var = "gene_id") {
+read_fastq_lengths <- function(config, meta) {
+  trimmed_path <- file.path(config$data_path, config$dir$fastq_trimmed)
+  f_trim <- read_fastq_length(trimmed_path, meta) |> 
+    add_column(type = "Trimmed")
+  clean_path <- file.path(config$data_path, config$dir$fastq_clean)
+  f_clean <- read_fastq_length(clean_path, meta) |> 
+    add_column(type = "Clean")
+  bind_rows(f_trim, f_clean)
+}
+
+
+
+mat2dat <- function(tab, to_what = "abu_norm", names = "sample", id_var = "id") {
   tab |> 
     as.data.frame() |> 
     rownames_to_column(id_var) |> 
@@ -820,7 +837,7 @@ mat2dat <- function(tab, to_what = "abu_norm", names = "sample", id_var = "gene_
 #'   expression column. The function adds the corrected expression values as a
 #'   new column in `$dat` and updates `$metadata` to include only the samples
 #'   that were included in the adjustment.
-remove_batch_effects <- function(set, what = "count_norm", names = "sample", id_var = "gene_id",
+remove_batch_effects <- function(set, what = "count_norm", names = "sample", id_var = "id",
                                  batch_var = "day", formula = "~ condition + day",
                                  filt = "TRUE") {
   
@@ -867,3 +884,14 @@ remove_batch_effects <- function(set, what = "count_norm", names = "sample", id_
 }
 
 
+write_counts <- function(set, file, what = "count_norm") {
+  i2n <- set$genes |> 
+    select(id, gene_symbol) |> 
+    distinct()
+  set$dat |>
+    pivot_wider(id_cols = id, names_from = sample, values_from = !!what) |> 
+    left_join(i2n, by = "id") |> 
+    relocate(gene_symbol, .after = 1) |> 
+    mutate(across(where(is.numeric), ~signif(.x, 4))) |> 
+    write_csv(file)
+}

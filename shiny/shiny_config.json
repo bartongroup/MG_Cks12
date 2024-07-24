@@ -1,0 +1,15 @@
+{
+  "title" : "PIM inhibitor",
+  "data_path" : "../data",
+  "max_points" : 3000,
+  "file_names" : {
+    "data": "data.qs",
+    "de1": "de1.qs",
+    "de2" : "de2.qs",
+    "metadata" : "metadata.qs",
+    "features": "features.qs",
+    "terms" : "terms.qss",
+    "fterms": "fterms.qs",
+    "gse" : "gse.qs"
+  }
+}

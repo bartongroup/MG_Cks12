@@ -33,8 +33,13 @@ editor:
 suppressPackageStartupMessages({
   library(ggplot2)
   library(dplyr)
+  library(purrr)
+  library(stringr)
+  library(forcats)
   library(targets)
   library(gt)
+  library(cowplot)
+  library(UpSetR)
 })
 tar_config_set(store = "../_targets")
 ```
@@ -135,24 +140,25 @@ tar_read(software_versions) |>
 
 # Design
 
-The experimental data came in two batches. The Pilot was done in two cell lines and two time points, but with no replicates, so it was decided to repeat the experiment in the smaller setting - with one time point and one cell line.  @tbl-metadata presents the full experimental design. The `Sample` column contains the sample names referenced throughout this report. The non-replicated samples from the Pilot (at 48h and HeLa cells) were removed from downstream analysis.
+The experimental data came in two batches. The Pilot was done in two cell lines and two time points, but with no replicates, so it was decided to repeat the experiment in the smaller setting - with one time point and one cell line.  @tbl-metadata presents the full experimental design. The `Sample` column contains the sample names referenced throughout this report. The Pilot samples were removed from downstream analysis (see below for explanation).
 
 ```{r}
 #| label: tbl-metadata
 #| tbl-cap: Design of the experiment. The shaded rows indicate samples removed from downstream analysis.
-tar_read(metadata) |> 
-  select(Experiment = experiment, Sample = sample, `Original sample` = raw_sample, `Cell line` = cell_line, `Time point` = time_point, Treatment = treatment, Replicate = replicate, bad) |> 
-  gt() |> 
-    tab_style(
+#| cache: false
+targets::tar_read(metadata) |> 
+  dplyr::select(Experiment = experiment, Sample = sample, `Original sample` = raw_sample, `Cell line` = cell_line, `Time point` = time_point, Treatment = treatment, siCks1, siCks2, Replicate = replicate, bad) |> 
+  gt::gt() |> 
+    gt::tab_style(
     style = list(
-      cell_fill(color = "#FFE4B5")
+      gt::cell_fill(color = "#FFE4B5")
     ),
-    locations = cells_body(
-      columns = everything(),
+    locations = gt::cells_body(
+      columns = gt::everything(),
       rows = bad == TRUE
     )
   ) |> 
-    cols_hide(bad)
+    gt::cols_hide(bad) 
 ```
 
 
@@ -164,12 +170,12 @@ Sequencing was done by NovoGene. We have paired-end reads 2 x 150 bp.
 
 ## Ribosomal RNA removal
 
-The tool [RiboDetector](https://github.com/hzi-bifo/RiboDetector) was utilized to remove reads matching ribosomal RNA from the FASTQ files. RiboDetector is a machine learning tool capable of recognizing ribosomal RNA. As shown in @fig-ribo, there is no substantial ribosomal contamination.
+The tool [RiboDetector](https://github.com/hzi-bifo/RiboDetector) was utilized to remove reads matching ribosomal RNA from the FASTQ files. RiboDetector is a machine learning tool capable of recognizing ribosomal RNA. As shown in @fig-ribo, there is no substantial ribosomal contamination, except for sample `siCks2_1`, where over 6% of reads are ribosomal.
 
 ```{r}
 #| label: fig-ribo
 #| fig-cap: Proportion of ribosomal reads detected in each sample.
-#| fig-width: 5
+#| fig-width: 6
 #| fig-height: 5
 tar_read(fig_ribo_prop)
 ```
@@ -186,7 +192,7 @@ notable contamination from other organisms.
 ```{r}
 #| label: fig-fscreen
 #| fig-cap: Fscreen results, one hit per one genome and multiple hits per one genome are inluded.
-#| fig-width: 4.5
+#| fig-width: 6
 #| fig-height: 4
 tar_read(fig_fscreen)
 ```
@@ -197,7 +203,7 @@ tar_read(fig_fscreen)
 @fig-read-qual-clust shows hierarchical clustering based on read
 quality. This has nothing to do with biology, but rather shows potential
 batch effects related to sequencing, e.g. different flow cells,
-different instruments.
+different instruments. The Pilot samples (replicates 5, 6, 7, 8) stand out in the clustering. Also, samples `siCks1_3`, `siNT_3` and `siNT_6` stand out.
 
 ```{r}
 #| label: fig-read-qual
@@ -211,7 +217,7 @@ tar_read(fig_read_qual)
 #| label: fig-read-qual-clust
 #| fig-cap: Clustering based on read quality.
 #| fig-width: 4
-#| fig-height: 3
+#| fig-height: 5
 tar_read(fig_read_qual_clust)
 ```
 
@@ -236,7 +242,7 @@ reference genome GRCh38 downloaded from Ensembl (release
 
 ## Mapping properties
 
-@fig-star-log and @fig-map-count show mapping summaries.
+@fig-star-log and @fig-map-count show mapping summaries. Pilot samples (replicates 5, 6, 7, 8) shows markedly lower mapping quality, with higher proportion of unmapped reads.
 
 ```{r}
 #| label: fig-star-log
@@ -250,8 +256,8 @@ tar_read(fig_star_log)
 #| label: fig-map-count
 #| fig-cap: Input counts vs mapped and counted reads. Samples are ordered from the lowest to the highest percentage of uniquely mapped reads.
 #| fig-width: 8
-#| fig-height: 4
-tar_read(fig_map_count)
+#| fig-height: 8
+tar_read(fig_map_count) 
 ```
 
 ## Strandedness
@@ -295,8 +301,8 @@ The full quality-control report, based on *FastQC*, *FastQ Screen*,
 
 ```{r}
 #| label: fig-sample-dist
-#| fig-cap: Distribution of regularised log-count per sample.
-knitr::include_graphics("../fig/sample_quasirandom.png") 
+#| fig-cap: Distribution of raw read count per sample. Black lines show the median of each sample. Zeroes are not shown in the distribution, but they are included in the median calculation.
+knitr::include_graphics("../fig/sample_quasirandom.png")
 ```
 
 Next figures are based on [regularised
@@ -312,13 +318,94 @@ between each pair of samples, PCA results and hierarchical clustering.
 g1 <- tar_read(fig_distance_mat)
 g2 <- tar_read(fig_pca)
 g3 <- tar_read(fig_clustering)
-cowplot::plot_grid(g1, g2, g3, ncol = 1, labels = c("A", "B", "C"))
+cowplot::plot_grid(g1, g2, g3, ncol = 1, labels = c("A", "B", "C")) 
+```
+
+
+There is a large disparity between the Pilot and experiment EK_042. This can be seen particularly well from the dendrogram in @{fig-properties}C, where the font colours encode the experiments (Pilot in orange, EK_042 in blue). Based on the quality information, large difference in global count properties and the lack of replicates in the Pilot samples, we decide not to use them in the downstream analysis.
+
+# Cks1 and Cks2 genes
+
+@fig-cks shows that Cks1 and Cks2 siRNA worked well and was specific to the gene.
+
+```{r}
+#| label: fig-cks
+#| fig-cap: Normalized count from Cks1 and Cks2 genes under different treatments.
+#| fig-width: 6
+#| fig-height: 3
+tar_read(fig_cks)
+```
+
+# Differential expression
+
+Only genes with at least 10 counts in at least one sample were retained for this analysis. Only EK_042 data were used. P-values were corrected for multiple tests using the Benjamini-Hochberg method. Unless stated otherwise, the significance threshold is set to FDR < 0.01.
+
+
+## Treatment model
+
+Differential expression was carried out with *edgeR* with a model
+
+```         
+~ treatment
+```
+
+The baseline was `treatment = siNT`, and the contrasts are for treatments `siCks1`, `siCks2` and  `siCks1.2`, separately. The results are shown in @fig-def1.
+
+```{r}
+#| label: fig-def1
+#| fig-cap: Differential expression results from the model `~ treatment`. A. Volcano plots. B. MA plots. C. Distribution of p-values. Black dots indicate significantly changing genes.
+#| fig-width: 8
+#| fig-height: 10
+tar_load(figs_def1)
+plot_grid(plotlist = figs_def1, ncol = 1, labels = c("A", "B", "C"))
+```
+
+## Significant genes overlap
+
+```{r}
+#| label: fig-upset-1
+#| fig-cap: Overlap between significant genes in the treatment model.
+#| fig-width: 6
+#| fig-height: 6
+tar_load(def1_ids)
+upset(fromList(def1_ids))
+```
+
+## Independent siCks1 and siCks2 model
+
+Here the model is
+
+```         
+~ siCks1 + siCks2
+```
+
+where `siCks1` and `siCks2` are defined as in @tbl-metadata. They represent *independent* contributions from Cks1/2 depletion. The baseline was `siCks1 = '-'` and `siCks2 = '-'`. The results are shown in @fig-def1.
+
+```{r}
+#| label: fig-def2
+#| fig-cap: Differential expression results from the model `~ siCks1 + siCks2`. A. Volcano plots. B. MA plots. C. Distribution of p-values. Black dots indicate significantly changing genes.
+#| fig-width: 6
+#| fig-height: 10
+tar_load(figs_def2)
+plot_grid(plotlist = figs_def2, ncol = 1, labels = c("A", "B", "C"))
+```
+
+## Significant genes overlap
+
+```{r}
+#| label: fig-upset-2
+#| fig-cap: Overlap between significant genes in the independent siCks1 and siCks2 model.
+#| fig-width: 6
+#| fig-height: 6
+tar_load(def2_ids)
+upset(fromList(def2_ids))
 ```
 
 
 
+# Gene set enrichment
 
-
+Gene set enrichment analysis (using `fgsea` package) did not find any significant terms in GO, KEGG, Reactom and Bioplanet.
 
 
 # Resources
@@ -327,8 +414,6 @@ cowplot::plot_grid(g1, g2, g3, ncol = 1, labels = c("A", "B", "C"))
 
 -   [Differential
     expression](https://gjb-shiny.compbio.dundee.ac.uk/mgierlinski/private/cks12/de)
--   [Gene set
-    enrichment](https://gjb-shiny.compbio.dundee.ac.uk/mgierlinski/private/cks12/gsea)
 
 ## Downloads {#sec-downloads}
 

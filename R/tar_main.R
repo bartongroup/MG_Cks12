@@ -4,9 +4,9 @@ targets_main <- function() {
     mart = new_mart(config),
     chromosomes = biomart_fetch_chromosomes(mart),
     gns = biomart_fetch_genes(mart),
-    terms = get_functional_terms(config, gns)
-    #gterms = prepare_terms_gsea(terms, star$genes$gene_id),
-    #fterms = prepare_terms_fenr(terms, star$genes$gene_id)
+    terms = get_functional_terms(config, gns),
+    gterms = prepare_terms_gsea(terms, star$genes$id),
+    fterms = prepare_terms_fenr(terms, star$genes$id)
   )
   
   setup_experiment <- tar_plan(
@@ -32,24 +32,38 @@ targets_main <- function() {
     fig_chrom_count = plot_chrom_proportion(idxstats, chromosomes, per_length = FALSE),
     fig_scaffold_count = plot_chrom_proportion(idxstats, scaffolds, per_length = FALSE),
     
-    fig_sample_dist = plot_sample_distributions(star, x_breaks = c(0, 1, 2, 3, 4, 5), x_lim = c(-1, 5), ncol = 4, colour_var = "condition"),
-    fig_mean_var = plot_mean_var(star, group_var = "condition"),
+    png_sample_dist = plot_sample_quasirandom(star, colour_var = "experiment") |> gs("sample_quasirandom", 8, 3.5),
+    fig_mean_var = plot_mean_var(star, group_var = "experiment"),
     fig_distance_mat = plot_distance_matrix(star),
-    fig_clustering = plot_clustering(star, colour_var = "condition"),
-    fig_pca = plot_pca(star, colour_var = "condition", shape_var = "experiment")
+    fig_clustering = plot_clustering(star, colour_var = "experiment"),
+    fig_pca = plot_pca(star, colour_var = "experiment", shape_var = "treatment")
   )
   
   star <- tar_plan(
-    star = read_and_process_star(config, metadata, bm_genes, min_count = 10),
-    bg = read_bedgraphs(config, metadata, "50000"),
+    star = read_and_process_star(config, metadata, gns, min_count = 0) |> 
+      filter_per_experiment(min_count = 10),
+    #bg = read_bedgraphs(config, metadata),
     
     tab_star_log = star$star_log,
-    fig_star_log = plot_star_log(star$star_log, metadata),
-    fig_star_log_map = plot_star_log_map(star$star_log, metadata),
-    fig_map_count = plot_mapped_count(star),
+    fig_star_log = plot_star_log(star, group_var = "experiment"),
+    fig_star_log_map = plot_star_log_map(star),
+    fig_map_count = plot_mapped_count(star, nrow = 2),
     
     example_count_file = one_count_file(config, metadata, 1),
-    fig_star_sense = plot_star_sense(example_count_file)
+    fig_star_sense = plot_star_sense(example_count_file),
+
+    all_ids = star$dat |> filter(!bad) |> pull(id) |> unique()
+  )
+
+  de <- tar_plan(
+    def1 = edger_de_formula(star, "~ treatment"),
+    def2 = edger_de_formula(star, "~ siCks1 + siCks2"),
+    
+    figs_def1 = plot_vmp(def1, fdr_limit = config$fdr_limit),
+    figs_def2 = plot_vmp(def2, fdr_limit = config$fdr_limit),
+
+    def1_ids = select_de_ids(def1, config$fdr_limit),
+    def2_ids = select_de_ids(def2, config$fdr_limit)
   )
 
   get_environment <- tar_plan(
@@ -60,12 +74,36 @@ targets_main <- function() {
     )
   )
 
+  gene_set_enrichment <- tar_plan(
+    gse1 = fgsea_all_terms(def1, gterms),
+    gse2 = fgsea_all_terms(def2, gterms),
+    gse_example = list(ontology = "bp", term_id = "bioplanet_1138", contrast = "treatmentsiCks1.2"),
+    gse_random = list(ontology = "bp", term_id = "bioplanet_1340", contrast = "treatmentsiCks1.2"),
+    gse_example_stats = make_gse_example(def1, terms, gse1, gse_example),
+    gse_random_stats = make_gse_example(def1, terms, gse1, gse_random),
+    
+    fig_fg_example = plot_fgsea_enrichment(def1, gterms, gse_example),
+    fig_fg_example_random = plot_fgsea_enrichment(def1, gterms, gse_random)
+  )
+
+  for_report <- tar_plan(
+    cks_ids = gns |> filter(gene_symbol %in% c("CKS1B", "CKS2")) |> pull(id) |> unique(),
+    fig_cks = plot_gene_groups(star, cks_ids, "count_norm", group_var = "treatment")
+  )
   
+  for_shiny <- tar_plan(
+    sav_shiny = save_data_for_shiny(star, def1, def2, terms, fterms)
+  )
+
   c(
     get_annotations,
     setup_experiment,
     get_environment,
     qc,
-    star
+    star,
+    de,
+    gene_set_enrichment,
+    for_report,
+    for_shiny
   )
 }

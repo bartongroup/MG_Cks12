@@ -116,6 +116,21 @@ plot_fscreen_slog <- function(fs, slog, genome, fs_var = "%One_hit_one_genome", 
     labs(x = slog_var, y = fs_var)
 }
 
+plot_ribo_proportion <- function(fl) {
+  fl |> 
+    pivot_wider(id_cols = sample, names_from = type, values_from = read_count) |> 
+    mutate(prop = 1 - Clean / Trimmed) |> 
+  ggplot(aes(x = sample, y = prop)) +
+    theme_bw() +
+    theme(
+      panel.grid = element_blank(),
+      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+    ) +
+    geom_col() +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.03))) +
+    labs(x = NULL, y = "Ribosomal proportion")
+}
+
 
 
 

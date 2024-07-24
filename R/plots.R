@@ -6,7 +6,7 @@ th <- ggplot2::theme_bw() +
 scientific_10 <- function(v, limit = 3.01) {
   sc <- map_chr(v, function(x) {
     if (is.na(x)) {
-      x
+      as.character(x)
     } else if (x == 0 | abs(log10(x)) < limit) {
       format(x, scientific = FALSE)
     } else {
@@ -30,46 +30,58 @@ gp <- function(gg, name, width, height) {
                   width = width, height = height)
 }
 
-plot_volma <- function(res, p, fdr, fc, group, point_size, point_alpha) {
+
+
+
+plot_volma <- function(res, point_size, point_alpha) {
   r <- res |>
-    mutate(
-      p = get(p),
-      group = get(group)
-    ) |> 
-    select(x, y, sig, group)
-  rsel <- r |> filter(sig)
-  rm(res)  # Minimise environment for serialisation
-  ggplot(r, aes(x = x, y = y)) +
+    select(x, y, sel, group)
+  r_sel <- r |> filter(sel)
+  r_nsel <- r |> filter(!sel)
+  
+  rm(res, r)  # Minimise environment for serialisation
+  
+  g <- ggplot() +
     theme_bw() +
     theme(
       panel.grid = element_blank(),
       legend.position = "none"
     ) +
-    geom_point(size = point_size, alpha = point_alpha, colour = "grey80") +
-    geom_point(data = rsel, colour = "black") +
-    facet_wrap(~ group) 
+    geom_point(data = r_nsel, aes(x = x, y = y), colour = "grey70",
+               size = point_size, alpha = point_alpha) +
+    facet_wrap( ~ group)
+  
+  if (nrow(r_sel) > 0) {
+    g <- g + geom_point(data = r_sel, aes(x = x, y = y), colour = "black",
+                        size = point_size, alpha = point_alpha)
+  }
+  g
 }
 
-plot_ma <- function(res, a = "logCPM", fc = "logFC", p = "PValue", fdr = "FDR", group = "contrast",
-                    point_size = 0.5, point_alpha = 0.5) {
-  res |> 
+plot_ma <- function(res, a = "AveExpr", fc = "logFC", p = "PValue", fdr = "FDR", group = "contrast",
+                    fdr_limit = 0.05, point_size = 0.5, point_alpha = 0.5) {
+  res |>
     mutate(
       x = get(a),
       y = get(fc),
-    ) |> 
-    plot_volma(p, fdr, fc, group, point_size, point_alpha) +
+      group = get(group),
+      sel = get(fdr) < fdr_limit
+    ) |>
+    plot_volma(point_size, point_alpha) +
     geom_hline(yintercept = 0, linewidth = 0.1, alpha = 0.5) +
     labs(x = expression(log[10]~Intensity), y = expression(log[2]~FC))
 }
 
 plot_volcano <- function(res, fc = "logFC", p = "PValue", fdr = "FDR", group = "contrast",
-                         point_size = 0.5, point_alpha = 0.5) {
-  res |> 
+                         fdr_limit = 0.05, point_size = 0.5, point_alpha = 0.5) {
+  res |>
     mutate(
       x = get(fc),
       y = -log10(get(p)),
-    ) |> 
-    plot_volma(p, fdr, fc, group, point_size, point_alpha) +
+      group = get(group),
+      sel = get(fdr) < fdr_limit
+    ) |>
+    plot_volma(point_size, point_alpha) +
     geom_vline(xintercept = 0, linewidth = 0.1, alpha = 0.5) +
     labs(x = expression(log[2]~FC), y = expression(-log[10]~P)) +
     scale_y_continuous(expand = expansion(mult = c(0, 0.03)))
@@ -77,8 +89,8 @@ plot_volcano <- function(res, fc = "logFC", p = "PValue", fdr = "FDR", group = "
 
 plot_pdist <- function(res, p = "PValue", group = "contrast", n_bins = 50) {
   brks <- seq(0, 1, length.out = n_bins)
-  r <- res |> 
-    mutate(p = get(p), grp = get(group)) |> 
+  r <- res |>
+    mutate(p = get(p), grp = get(group)) |>
     select(p, grp)
   rm(res)
   ggplot(r, aes(x = p, y = after_stat(density))) +
@@ -86,12 +98,20 @@ plot_pdist <- function(res, p = "PValue", group = "contrast", n_bins = 50) {
     theme(panel.grid = element_blank()) +
     geom_histogram(breaks = brks) +
     scale_y_continuous(expand = expansion(mult = c(0, 0.03))) +
-    facet_grid(. ~ grp)
+    facet_wrap(~grp)
+}
+
+plot_vmp <- function(res, a = "logCPM", fc = "logFC", p = "PValue", fdr = "FDR", group = "contrast",
+                     fdr_limit = 0.05, point_size = 0.5, point_alpha = 0.5, n_bins = 50){
+  list(
+    volcano = plot_volcano(res, fc, p, fdr, group, fdr_limit, point_size, point_alpha),
+    ma = plot_ma(res, a, fc, p, fdr, group, fdr_limit, point_size, point_alpha),
+    pdist = plot_pdist(res, p, group, n_bins)
+  )
 }
 
 
-
-mn_plot_volcano <- function(de, group_ids = NULL, id_var = "gene_id", group_var = "group", 
+mn_plot_volcano <- function(de, group_ids = NULL, id_var = "id", group_var = "group", 
                             fdr_limit = 0.01, logfc_limit = 0, with_names = TRUE,
                             palette = okabe_ito_palette) {
   
@@ -152,7 +172,40 @@ mn_plot_volcano <- function(de, group_ids = NULL, id_var = "gene_id", group_var 
   g
 }
 
+make_fc_fc <- function(de, ctr1, ctr2, fdr_limit = 0.01, sig_sel = c("any", "both", "x", "y")) {
+  sig_sel = match.arg(sig_sel)
 
+  fcfc <- de |> 
+    filter(contrast %in% c(ctr1, ctr2)) |> 
+    mutate(ctr = case_match(
+      contrast,
+      ctr1 ~ "x",
+      ctr2 ~ "y"
+    )) |> 
+    pivot_wider(id_cols = id, names_from = ctr, values_from = c(logFC, FDR)) 
+
+  if(sig_sel == "any") {
+    fcfc <- fcfc |> mutate(sel = FDR_x < fdr_limit | FDR_y < fdr_limit)
+  } else if(sig_sel == "both") {
+    fcfc <- fcfc |> mutate(sel = FDR_x < fdr_limit & FDR_y < fdr_limit)
+  } else if(sig_sel == "x") {
+    fcfc <- fcfc |> mutate(sel = FDR_x < fdr_limit)
+  } else if(sig_sel == "y") {
+    fcfc <- fcfc |> mutate(sel = FDR_y < fdr_limit)
+  } 
+}
+
+plot_fc_fc <- function(fcfc, x_lab, y_lab) {
+  fcfc |> 
+    mutate(
+      group = "Fold change vs fold change"
+    ) |> 
+    select(x = logFC_x, y = logFC_y, group, sel) |> 
+    plot_volma(point_size = 1, point_alpha = 1) +
+    labs(x = x_lab, y = y_lab) +
+    geom_hline(yintercept = 0, colour = "brown", alpha = 0.3) +
+    geom_vline(xintercept = 0, colour = "brown", alpha = 0.3)
+}
 
 
 make_hist <- function(x, bins) {
@@ -164,16 +217,47 @@ make_hist <- function(x, bins) {
 }
 
 
+plot_sample_quasirandom <- function(set, what = "count", colour_var = "treatment", log_scale = TRUE) {
+  df <- set$dat |> 
+    left_join(set$metadata, by = "sample") |> 
+    mutate(val = get(what), colvar = get(colour_var)) 
+  if(log_scale)
+    df <- df |> filter(val > 0)
+  dm <- df |> 
+    group_by(sample) |> 
+    summarise(M = median(val)) |> 
+    mutate(x = as.integer(sample))
+  w <- 0.3
+  
+  g <- df |> 
+    ggplot() +
+    th +
+    theme(
+      axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+      legend.position = "bottom"
+    ) +
+    geom_quasirandom(aes(x = sample, y = val, colour = colvar), size = 0.4, varwidth = TRUE) +
+    geom_segment(data = dm, aes(x = x - w, xend = x + w, y = M, yend = M)) +
+    scale_color_manual(values = okabe_ito_palette) +
+    labs(x = NULL, y = what, colour = colour_var)
+  if(log_scale)
+    g <- g + scale_y_log10(labels = scientific_10)
+  g
+}
+
 plot_sample_distributions <- function(set, bins = 100, ncol = 15, what = "rlog", colour_var = "group",
-                                      x_breaks = c(-5, 0, 5), text_size = 10, x_lim = c(-5, 5), log_scale = FALSE) {
+                                      x_breaks = c(-5, 0, 5), text_size = 10, x_lim = c(-5, 5), log_scale = FALSE,
+                                      scales = "free_y") {
   d <- set$dat |> 
     left_join(set$metadata, by = "sample") |> 
     mutate(val = get(what), colvar = get(colour_var)) |> 
     select(sample, val, colvar)
-  if(log_scale)
+  if(log_scale) {
     d <- d |> 
       filter(val > 0) |> 
       mutate(val = log10(val))
+    what <- str_glue("log {what}")    
+  }
   d <- d |> 
     nest(data = val) |> 
     mutate(hist = map(data, ~make_hist(.x$val, bins = bins))) |> 
@@ -189,18 +273,19 @@ plot_sample_distributions <- function(set, bins = 100, ncol = 15, what = "rlog",
       text = element_text(size = text_size),
       panel.grid = element_blank(),
       panel.border = element_blank(),
+      axis.line.y = element_blank(),
       axis.text.y = element_blank(),
       axis.ticks.y = element_blank(),
       strip.background = element_blank()
     ) +
     geom_col(width = w) +
-    geom_hline(yintercept = 0, colour = "brown") +
-    geom_vline(xintercept = 0, colour = "brown") +
-    facet_wrap(~sample, scales = "free_y", ncol = ncol) +
+    geom_hline(yintercept = 0, colour = "black") +
+    #geom_vline(xintercept = 0, colour = "brown") +
+    facet_wrap(~sample, scales = scales, ncol = ncol) +
     scale_fill_manual(values = okabe_ito_palette) +
     scale_x_continuous(breaks = x_breaks, limits = x_lim) +
     scale_y_continuous(expand = expansion(mult = c(0, 0.03))) +
-    labs(x = what, y = "Density", colour = colour_var)
+    labs(x = what, y = "Density", fill = colour_var)
 }
 
 plot_kernels <- function(set, what = "rlog", xlab = "rlog") {
@@ -277,7 +362,7 @@ plot_distance_matrix <- function(set, what = "rlog", text_size = 10) {
   rm(set, tab)
   ggplot(d, aes(x = sample, y = name)) +
     geom_tile(aes(fill = value)) +
-    scale_fill_viridis(option = "cividis") +
+    scale_fill_viridis_c(option = "cividis") +
     theme(
       axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, size = text_size),
       axis.text.y = element_text(size = text_size)
@@ -288,17 +373,17 @@ plot_distance_matrix <- function(set, what = "rlog", text_size = 10) {
 
 plot_mean_var <- function(set, point.size = 0.5, what = "count_norm", group_var = "group") {
   d <- set$dat |> 
-    filter(good) |> 
+    filter(!bad) |> 
     left_join(set$metadata, by = "sample") |> 
     mutate(val = get(what), group = get(group_var)) |> 
-    group_by(gene_id, group) |> 
+    group_by(id, group) |> 
     summarise(M = mean(val), V = var(val))
   d |> 
     ggplot(aes(x = log10(M), y = log10(V))) +
     theme_bw() +
     theme(panel.grid = element_blank()) +
     ggpointdensity::geom_pointdensity(size = point.size) +
-    scale_fill_viridis() +
+    scale_fill_viridis_c() +
     geom_abline(slope = 1, intercept = 0, colour = "red", alpha = 0.3) +
     facet_wrap(~group) +
     labs(x = expression(log[10]~mean), y = expression(log[10]~variance))
@@ -392,19 +477,22 @@ plot_up_down <- function(res, groupvar = "contrast") {
 
 plot_pair_outliers <- function(set, pair, genes, amp = 2, tau = 3, label.size = 2.5, value = "count_norm") {
   efun <- function(x) {amp * exp(-x / tau)}
+  genes <- genes |> 
+    select(id, gene_symbol) |> 
+    distinct()
   d <- set$dat |>
-    filter(good) |> 
+    filter(!bad) |> 
     filter(sample %in% pair) |>
     mutate(val = !!sym(value)) |> 
     mutate(val = log10(val + 0.5)) |> 
-    pivot_wider(id_cols = gene_id, names_from = sample, values_from = val) |> 
+    pivot_wider(id_cols = id, names_from = sample, values_from = val) |> 
     rename(v1 = pair[1], v2 = pair[2]) |> 
     mutate(x = v1 + v2, y = v2 - v1) |> 
     mutate(f = efun(x)) |> 
-    select(gene_id, x, y, f)
+    select(id, x, y, f)
   dsel <- d |> 
     filter(abs(y) > f) |> 
-    left_join(genes, by = "gene_id") 
+    left_join(genes, by = "id") 
   ggplot(d, aes(x = x, y = y)) +
     theme_bw() +
     theme(legend.position = "none") +
@@ -412,21 +500,24 @@ plot_pair_outliers <- function(set, pair, genes, amp = 2, tau = 3, label.size = 
     geom_line(aes(y = f), colour = "grey90") +
     geom_line(aes(y = -f), colour = "grey90") +
     #geom_hex(bins = 300) +
-    scale_fill_viridis(option = "cividis", trans = "sqrt") +
+    scale_fill_viridis_c(option = "cividis", trans = "sqrt") +
     labs(x = paste(pair[1], "+", y = pair[2]), y = paste(pair[2], "-", y = pair[1])) +
     geom_text_repel(data = dsel, aes(label = gene_symbol), size = label.size, max.overlaps = 30)
 }
 
 plot_pair_outliers_rlog <- function(set, pair, gene_info, limit = 2, label.size = 2.5) {
+  gene_info <- gene_info |> 
+    select(id, gene_symbol) |> 
+    distinct()
   d <- set$dat |>
     filter(sample %in% pair) |>
-    pivot_wider(id_cols = gene_id, names_from = sample, values_from = rlog) |> 
+    pivot_wider(id_cols = id, names_from = sample, values_from = rlog) |> 
     rename(v1 = pair[1], v2 = pair[2]) |> 
     mutate(x = v1 + v2, y = v2 - v1) |> 
-    select(gene_id, x, y)
+    select(id, x, y)
   dsel <- d |> 
     filter(abs(y) > limit) |> 
-    left_join(gene_info, by = "gene_id") 
+    left_join(gene_info, by = "id") 
   ggplot(d, aes(x = x, y = y)) +
     theme_bw() +
     theme(
@@ -435,7 +526,7 @@ plot_pair_outliers_rlog <- function(set, pair, gene_info, limit = 2, label.size 
     ) +
     geom_point(alpha = 0.3, colour = "black", size = 0.5) +
     geom_hline(yintercept = c(-limit, limit), colour = "grey90") +
-    scale_fill_viridis(option = "cividis", trans = "sqrt") +
+    scale_fill_viridis_c(option = "cividis", trans = "sqrt") +
     labs(x = paste(pair[1], "+", y = pair[2]), y = paste(pair[2], "-", y = pair[1])) +
     geom_text_repel(data = dsel, aes(label = gene_symbol), size = label.size, max.overlaps = 30)
 }
@@ -502,12 +593,12 @@ plot_biotype_de <- function(res, groupvar = "contrast") {
 
 plot_gene_count <- function(set, gid, val = "count_norm", log.scale = FALSE, ncol = 2, symbol.size = 3, fill = "group", shape = "zero") {
   d <- set$dat |> 
-    filter(gene_id %in% gid) |> 
+    filter(id %in% gid) |> 
     mutate(value = get(val)) |> 
     mutate(zero = value == 0) |> 
     left_join(set$metadata, by = "sample") |> 
-    left_join(set$genes, by = "gene_id") |> 
-    mutate(gene_symbol = if_else(is.na(gene_symbol), gene_id, gene_symbol)) |> 
+    left_join(set$genes, by = "id") |> 
+    mutate(gene_symbol = if_else(is.na(gene_symbol), id, gene_symbol)) |> 
     mutate(sample = factor(sample, levels = set$metadata$sample))
   
   if(log.scale) {
@@ -534,15 +625,17 @@ plot_gene_count <- function(set, gid, val = "count_norm", log.scale = FALSE, nco
 }
 
 plot_gene_groups <- function(set, gid, val = "count_norm", log_scale = FALSE, zero_scale = TRUE,
-                             ncol = 2, symbol.size = 3, cex = 2, group_var = "group",
+                             ncol = 4, symbol.size = 3, cex = 2, group_var = "group",
                              scales = "free_y") {
   d <- set$dat |> 
-    filter(gene_id %in% gid) |> 
+    filter(id %in% gid & !bad) |>
+    select(-bad) |> 
     left_join(set$metadata, by = "sample") |> 
-    left_join(set$genes, by = "gene_id") |> 
+    left_join(set$genes, by = "id") |> 
+    filter(!bad) |> 
     mutate(value = get(val), group = get(group_var)) |> 
     mutate(zero = value == 0) |> 
-    mutate(gene_symbol = if_else(is.na(gene_symbol), gene_id, gene_symbol)) |> 
+    mutate(gene_symbol = if_else(is.na(gene_symbol), id, gene_symbol)) |> 
     mutate(sample = factor(sample, levels = set$metadata$sample))
 
   if (log_scale) {
@@ -577,9 +670,9 @@ plot_gene_groups <- function(set, gid, val = "count_norm", log_scale = FALSE, ze
 plot_term_genes <- function(set, terms, trm, de, ctr, n_top = 24, n_col = 4, sign = 1, val = "count_norm") {
   all_gids <- terms$term2feature[[trm]]
   gids <- de |> 
-    filter(contrast == ctr & gene_id %in% all_gids) |> 
+    filter(contrast == ctr & id %in% all_gids) |> 
     arrange(-sign * logFC) |> 
-    pull(gene_id) |> 
+    pull(id) |> 
     unique() |> 
     head(n_top)
   plot_gene_groups(set, gids, val, ncol = n_col)
@@ -588,7 +681,7 @@ plot_term_genes <- function(set, terms, trm, de, ctr, n_top = 24, n_col = 4, sig
 plot_fc_comparison <- function(res, groupvar = "contrast") {
   mx <- max(abs(res$logFC))
   d <- res |> 
-    pivot_wider(id_cols = gene_id, names_from = sym(groupvar), values_from = logFC)
+    pivot_wider(id_cols = id, names_from = sym(groupvar), values_from = logFC)
     
   groups <- levels(res[[groupvar]])
   pairs <-  expand_grid(x = as_factor(groups), y = as_factor(groups)) |>
@@ -620,10 +713,10 @@ plot_fc_heatmap <- function(set, what = "rlog", min_n = 10, max_fc = 2,
   if (!is.null(sample_sel))
     d <- d |> filter(sample %in% sample_sel)
   if (!is.null(id_sel))
-    d <- d |> filter(gene_id %in% id_sel)
+    d <- d |> filter(id %in% id_sel)
   
   d <- d |> 
-    group_by(gene_id) |> 
+    group_by(id) |> 
     mutate(
       n = n(),
       fc = val - mean(val)
@@ -643,10 +736,10 @@ plot_fc_heatmap <- function(set, what = "rlog", min_n = 10, max_fc = 2,
 
 plot_de_dist <- function(set, de_genes) {
   set$dat |> 
-    filter(gene_id %in% de_genes) |> 
-    select(gene_id, sample, count) |> 
+    filter(id %in% de_genes) |> 
+    select(id, sample, count) |> 
     left_join(set$metadata, by = c("sample")) |> 
-    group_by(gene_id, group) |> 
+    group_by(id, group) |> 
     summarise(M = mean(count)) |> 
   ggplot(aes(x = M)) +
     theme_bw() +
@@ -660,8 +753,8 @@ plot_de_dist <- function(set, de_genes) {
 
 plot_group_profiles <- function(set, groups, ncol = 3) {
   set$dat |> 
-    mutate(gr = groups[gene_id]) |> 
-    group_by(gr, gene_id) |>
+    mutate(gr = groups[id]) |> 
+    group_by(gr, id) |>
     mutate(M = mean(rlog), rm = rlog - M) |>
     ungroup() |> 
     group_by(gr, sample) |>
@@ -778,7 +871,7 @@ plot_volcano_term <- function(res, gso, ctr, termids, ncol = 3) {
       x = logFC,
       y = -log10(PValue)
     ) |> 
-    select(gene_id, gene_symbol, x, y)
+    select(id, gene_symbol, x, y)
   
   termids <- intersect(termids, unique(gso$term_id))
   
@@ -793,7 +886,7 @@ plot_volcano_term <- function(res, gso, ctr, termids, ncol = 3) {
     term <- str_glue("{termid}: {termname}")
     
     d |> 
-      mutate(sel = gene_id %in% gns) |> 
+      mutate(sel = id %in% gns) |> 
       add_column(term = term)
   })
   

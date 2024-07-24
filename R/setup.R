@@ -22,11 +22,11 @@ make_metadata <- function(mfile) {
     ungroup() |> 
     unite(sample, c(treatment, replicate), remove = FALSE) |>
     mutate(
-      Cks1 = if_else(str_detect(treatment, "1"), "+", "-") |> fct_relevel("-"),
-      Cks2 = if_else(str_detect(treatment, "2"), "+", "-") |> fct_relevel("-"),
+      siCks1 = if_else(str_detect(treatment, "1"), "+", "-") |> fct_relevel("-"),
+      siCks2 = if_else(str_detect(treatment, "2"), "+", "-") |> fct_relevel("-"),
       experiment = fct_relevel(experiment, "Pilot"),
       treatment = fct_relevel(treatment, "siNT"),
-      bad = cell_line == "HeLa" | time_point == "48h"
+      bad = experiment == "Pilot"
     ) |> 
     arrange(bad, treatment, time_point, replicate, experiment) |> 
     mutate(sample = as_factor(sample))

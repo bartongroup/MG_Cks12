@@ -1,344 +1,219 @@
-edger_local <- function(dset, contrasts, gns, fdr_limit = 0.05, logfc_limit = 0, group_var = "condition") {
-  dat <- dset$dat |>
-    filter(gene_id %in% dset$sel)
-
-  genes <- gns |> 
-    select(gene_id, gene_symbol, gene_biotype, description) |> 
+add_genes <- function(res, info) {
+  g <- info |>
+    select(id, gene_symbol) |> 
     distinct()
-  
-  tab_all <- dat2mat(dat, "count")
-  
-  map_dfr(contrasts, function(ctr) {
-    groups <- str_split(ctr, "-") |> unlist()
-    meta <- dset$metadata |>
-      mutate(group = get(group_var)) |> 
-      select(sample, group) |>
-      filter(group %in% groups) |>
-      mutate(group = factor(group, levels = rev(groups))) |>   # second minus first
-      arrange(group) |>
-      distinct()
-    design_mat <- model.matrix(~group, meta)
-    coef <- colnames(design_mat)[2]
-    
-    tab_all[, meta$sample] |>
-      DGEList() |>
-      calcNormFactors() |>
-      estimateDisp(design = design_mat) |>
-      glmQLFit(design = design_mat) |>
-      glmQLFTest(coef = coef) |>
-      topTags(n = 1e16, adjust.method = "BH", sort.by = "none") |>
-      pluck("table") |>
-      as_tibble(rownames = "gene_id") |>
-      mutate(contrast = ctr)
-  }) |>
-    drop_na() |>
-    mutate(contrast = factor(contrast, levels = contrasts)) |>
-    mutate(sig = FDR < fdr_limit & abs(logFC) > logfc_limit) |> 
-    left_join(genes, by = "gene_id") |> 
-    mutate(gene_symbol = if_else(is.na(gene_symbol), gene_id, gene_symbol))
+  res |>
+    left_join(g, by = "id")
 }
 
-
-
-# using "group" variable
-edger_de <- function(set, gene_info, ctrs = NULL, normfac = NULL, id = "gene_id",
-                     fdr_limit = 0.05, logfc_limit = 0, group_var = "group") {
-  genes <- gene_info |> 
-    select(gene_id, gene_symbol, gene_biotype, description) |> 
-    distinct()
-  
-  cnt <- set$tab[set$sel, ]
-  meta <- set$metadata |> 
-    mutate(group = get(group_var))
-  groups <- levels(meta$group)
-  design_mat <- model.matrix(~0 + group, data = meta)
-  colnames(design_mat) <- groups
-  
-  if (is.null(ctrs)) {
-    # all pairwise comparisons
-    ctrs <- expand_grid(x = as_factor(groups), y = as_factor(groups)) |>
-      filter(as.integer(x) > as.integer(y)) |>
-      unite(contrast, c(x, y), sep = "-") |>
-      pull(contrast) 
-  } 
-  contrast_mat <- makeContrasts(contrasts = ctrs, levels = design_mat)
-  
-  dg <- DGEList(counts = as.matrix(cnt), group = meta$group)
-  if (is.null(normfac)) {
-    dg <- dg |> calcNormFactors()
-  } else {
-    n <- tibble(sample = rownames(dg$samples)) |> 
-      left_join(normfac, by = c("sample"))
-    dg$samples$norm.factors <- n$normfac
-  }
-    
-  fit <- dg |> 
-    estimateDisp(design = design_mat) |>
-    glmQLFit(design = design_mat)
-  
-  map_dfr(ctrs, function(ctr) {
-    glmQLFTest(fit, contrast = contrast_mat[, ctr]) |>
-      topTags(n = 1e16, adjust.method = "BH", sort.by = "none") |>
-      pluck("table") |>
-      as_tibble(rownames = id) |>
-      mutate(contrast = ctr)
-  }) |> 
-    mutate(contrast = contrast |> str_replace(" - ", "-") |> str_remove_all("group") |> as_factor()) |> 
-    left_join(genes, by = "gene_id") |> 
-    mutate(
-      gene_symbol = if_else(is.na(gene_symbol), gene_id, gene_symbol),
-      sig = FDR < fdr_limit & abs(logFC) > logfc_limit
-    )
-}
-
-
-# This version of edger_de is with intercept, so it contrasts are against
-# baseline. Coefficients and contrasts are automatically calculated, so no
-# contrast function necessary.
-
-edger_de_f <- function(set, gene_info, formula, base_condition, id = "gene_id", 
-                       fdr_limit = 0.05, logfc_limit = 0) {
-  genes <- gene_info |> 
-    select(gene_id, gene_symbol, gene_biotype, description) |> 
-    distinct()
-  
-  cnt <- set$tab[set$sel, ]
+#' Differential Expression Analysis with Formula
+#'
+#' This function performs differential expression analysis using the edgeR
+#' package with a specified formula.
+#'
+#' @param set A list containing the dataset, with `dat` and `metadata` elements.
+#' @param formula A formula specifying the model for the analysis.
+#' @param what A character string specifying the data type to analyze. Default
+#'   is `"count_norm"`.
+#' @param filt A character string representing a logical expression to filter
+#'   the metadata. Default is `"TRUE"`.
+#' @param id_col The name of the column with identifiers, default is `"id"`.
+#' @param sample_var A character string specifying the sample names variable. Default
+#'   is `"sample"`.
+#'
+#' @return A tibble with the differential expression results.
+edger_de_formula <- function(set, formula, what = "count", filt = "TRUE", id_col = "id", sample_var = "sample") {
   meta <- set$metadata |>
-    mutate(condition = fct_relevel(condition, base_condition))
-
+    filter(!bad & !!rlang::parse_expr(filt)) |>
+    droplevels()
+  dat <- set$dat |> 
+    filter(!bad)
+  
+  tab <- dat2mat(dat, what = what, id_col = id_col, sample_var = sample_var)[, as.character(meta[[sample_var]])]
   design_mat <- model.matrix(as.formula(formula), data = meta)
   coefs <- colnames(design_mat)[-1]
   
-  fit <- DGEList(counts = as.matrix(cnt)) |>
-    calcNormFactors() |>
-    estimateDisp(design = design_mat) |>
+  fit <- tab |>
+    DGEList() |>
+    normLibSizes() |>
     glmQLFit(design = design_mat)
   
-  map_df(coefs, function(cf) {
-    glmQLFTest(fit, coef = cf) |>
-      topTags(n = 1e16, adjust.method = "BH", sort.by = "none") |>
-      pluck("table") |>
-      as_tibble(rownames = id) |>
-      mutate(contrast = cf)
-  }) |>
+  coefs |> 
+    map(function(coef) {
+      fit |> 
+        glmQLFTest(coef = coef) |> 
+        topTags(n = 1e16, sort.by = "none") |> 
+        pluck("table") |> 
+        as_tibble(rownames = "id") |>
+        add_column(contrast = coef)
+   }) |> 
+    list_rbind() |> 
+    select(-F) |>
     mutate(contrast = factor(contrast, levels = coefs)) |> 
-    left_join(genes, by = "gene_id") |> 
-    mutate(
-      sig = FDR < fdr_limit & abs(logFC) > logfc_limit,
-      gene_symbol = if_else(is.na(gene_symbol), gene_id, gene_symbol),
-      base = base_condition
-    )
+    add_genes(set$genes)
 }
 
 
-de_list <- function(res, group_var, fdr, logfc, fdr_limit = 0.01, logfc_limit = 0, name = "") {
-  d <- filter(res, !!sym(fdr) < fdr_limit & abs(!!sym(logfc)) >= logfc_limit) |>
-    select(!!group_var, gene_symbol) |>
-    group_by(!!sym(group_var))
-  kname <- ifelse(name == "", "", paste0(name, ":"))
-  ks <- paste0(kname, group_keys(d)[[1]])
-  d |>
-    distinct() |>
-    group_map(~pull(.x, gene_symbol)) |>
-    set_names(ks)
-}
-
-save_de <- function(de, file) {
-  de |> 
-    pivot_wider(
-      id_cols = c(gene_id, gene_symbol, description),
-      names_from = contrast,
-      values_from = c(logFC, logCPM, PValue, FDR)
-    ) |> 
-    mutate(across(where(is.numeric), ~signif(.x, 4))) |> 
-    write_tsv(file)
-}
-
-
-
-# version doing all pairwise contrasts
-deseq2_de <- function(set, gene_info, ctrs = NULL, id = "gene_id", fdr_limit = 0.05, logfc_limit = 0) {
-  genes <- gene_info |> 
-    select(gene_id, gene_symbol, gene_biotype, description) |> 
-    distinct()
-  
-  cnt <- set$tab[set$sel, ]
-  meta <- set$metadata
-  groups <- levels(meta$group)
-  design_mat <- model.matrix(~0 + group, data = meta)
+#' Differential Expression Analysis for Selected Contrasts
+#'
+#' This function performs differential expression analysis using the limma
+#' package for selected contrasts.
+#'
+#' @param set A list containing the dataset, with `dat` and `metadata` elements.
+#' @param contrasts A character vector of contrasts to analyze. If `NULL`, all
+#'   pairs of contrasts are analyzed. Default is `NULL`.
+#' @param group_var A character string specifying the grouping variable in the
+#'   metadata. Default is `"treatment"`.
+#' @param what A character string specifying the data type to analyze. Default
+#'   is `"abu_norm"`.
+#' @param filt A character string representing a logical expression to filter
+#'   the metadata. Default is `"TRUE"`.
+#' @param names A character string specifying the sample names variable. Default
+#'   is `"sample"`.
+#'
+#' @return A tibble with the differential expression results.
+edger_de_contrasts <- function(set, contrasts = NULL, group_var = "group", what = "count", filt = "TRUE",
+                     id_col = "id", sample_var = "sample") {
+  meta <- set$metadata |>
+    filter(!bad & !!rlang::parse_expr(filt)) |>
+    mutate(group = get(group_var)) |>
+    filter(!is.na(group)) |>
+    droplevels()
+  dat <- set$dat |> 
+    filter(!bad)
+  groups <- unique(as.character(meta$group)) |>
+    janitor::make_clean_names()
+  design_mat <- model.matrix(~ 0 + group, data = meta)
   colnames(design_mat) <- groups
   
-  if (is.null(ctrs)) {
-    # all pairwise comparisons
-    ctrs <- expand_grid(x = as_factor(groups), y = as_factor(groups)) |>
-      filter(as.integer(x) > as.integer(y)) |>
-      unite(contrast, c(x, y), sep = "-") |>
-      pull(contrast) 
-  } 
+  tab <- dat2mat(dat, what = what, id_col = id_col, sample_var = sample_var)[, as.character(meta[[sample_var]])]
 
-  fit <- DESeqDataSetFromMatrix(countData = as.matrix(cnt), colData = meta, design = ~group) |> 
-    DESeq()
-
+  if (is.null(contrasts)) {
+    contrasts <- expand_grid(x = as_factor(groups), y = as_factor(groups)) |>
+      filter(as.integer(x) < as.integer(y)) |>
+      unite(contrast, c(y, x), sep = "-") |>
+      pull(contrast)
+  }
+  contrast_mat <- limma::makeContrasts(contrasts = contrasts, levels = design_mat)
   
-  map_dfr(ctrs, function(ctr) {
-    contr <- str_split(ctr, "-") |> unlist()
+  fit <- tab |>
+    DGEList(group = meta$group) |>
+    normLibSizes() |>
+    glmQLFit(design = design_mat)
+  
+  map(contrasts, function(ctr) {
     fit |> 
-      results(contrast = c("group", contr[1], contr[2])) |> 
-      as.data.frame() |> 
-      as_tibble(rownames = id) |>
+      glmQLFTest(contrast = contrast_mat[, ctr]) |>
+      topTags(n = 1e16, adjust.method = "BH", sort.by = "none") |>
+      pluck("table") |>
+      as_tibble(rownames = "id") |>
       mutate(contrast = ctr)
-  }) |> 
-    mutate(contrast = as_factor(contrast)) |> 
-    left_join(genes, by = "gene_id") |> 
-    rename(logFC = log2FoldChange, PValue = pvalue, FDR = padj) |> 
-    mutate(logMean = log2(baseMean)) |> 
-    mutate(sig = FDR < fdr_limit & abs(logFC) > logfc_limit)
-}
-
-
-
-
-edger_deseq_merge <- function(ed, de) {
-  eds <- ed |> 
-    select(gene_id, logFC, PValue, FDR, contrast, gene_symbol) |> 
-    mutate(tool = "edgeR")
-  des <- de |> 
-    select(gene_id, logFC, PValue, FDR, contrast, gene_symbol) |> 
-    mutate(tool = "DESeq2")
-  bind_rows(eds, des)
-}
-
-get_rank_k <- function(res, ctrst, direction = 1, max.k) {
-  res |>
-    filter(contrast == ctrst) |>
-    select(gene_id, logFC) |> 
-    arrange(desc(direction * logFC)) |> 
-    head(max.k) |> 
-    mutate(rank  = row_number())
-}
-
-plot_compare_top_genes <- function(res1, res2, max.k = 50) {
-  map_dfr(levels(res1$contrast), function(ctrst) {
-    r1_up <- get_rank_k(res1, ctrst, 1, max.k)
-    r2_up <- get_rank_k(res2, ctrst, 1, max.k)
-    r1_down <- get_rank_k(res1, ctrst, -1, max.k)
-    r2_down <- get_rank_k(res2, ctrst, -1, max.k)
-    
-    map_dfr(1:max.k, function(k) {
-      s1_up <- r1_up |> filter(rank <= k) |> pull(gene_id)
-      s2_up <- r2_up |> filter(rank <= k) |> pull(gene_id)
-      s1_down <- r1_down |> filter(rank <= k) |> pull(gene_id)
-      s2_down <- r2_down |> filter(rank <= k) |> pull(gene_id)
-      tibble(
-        k = k,
-        up = length(intersect(s1_up, s2_up)),
-        down = length(intersect(s1_down, s2_down))
-      )
-    }) |>
-      pivot_longer(-k, names_to = "Direction") |> 
-      add_column(contrast = ctrst)
-  }) |> 
-    mutate(contrast = factor(contrast, levels = levels(res1$contrast))) |> 
-
-  ggplot(aes(x = k, y = value, colour = Direction)) +
-    theme_bw() +
-    geom_abline(slope = 1, intercept = 0, colour = "red") +
-    geom_point() +
-    scale_x_continuous(expand = c(0, 0), limits = c(0, max.k + 1)) +
-    scale_y_continuous(expand = c(0, 0), limits = c(0, max.k + 1)) +
-    scale_colour_manual(values = okabe_ito_palette) +
-    facet_wrap(~contrast, nrow = 1) +
-    labs(x = "Gene rank", y = "Genes in common")
-}
-
-
-
-# one-sample limma against zero
-limma_de_ratio <- function(set, gene_info, what = "logratio", ref_cond = "Total", fdr_limit = 0.05, logfc_limit = 0) {
-  genes <- gene_info |> 
-    select(gene_id, gene_symbol, gene_biotype, description) |> 
-    distinct()
-  
-  mexrpr <- set$dat |> 
-    left_join(set$metadata, by = "sample") |> 
-    group_by(gene_id, condition) |> 
-    summarise(mrlog = mean(rlog)) |> 
-    ungroup()
-  
-  meta <- set$metadata |> 
-    filter(condition != ref_cond) |> 
-    droplevels()
-  conditions <- meta$condition |> 
-    unique()
-  X <- dat2mat(set$dat, what = what)
-  
-  map(conditions, function(cond) {
-    m <- meta |> 
-      filter(condition == cond)
-    tab <- X[, as.character(m$sample)]
-    
-    design_mat <- cbind(Intercept = rep(1, ncol(tab)))
-    tab |>
-      limma::lmFit(design_mat) |>
-      limma::eBayes() |> 
-      limma::topTable(number = 1e6, sort.by = "none") |>
-      as_tibble(rownames = "gene_id") |>
-      add_column(contrast = cond) 
   }) |> 
     list_rbind() |> 
-    left_join(mexrpr, by = c("gene_id", "contrast" = "condition")) |> 
-    rename(FDR = adj.P.Val, PValue = P.Value) |>
-    select(-c(t, B)) |> 
-    drop_na() |> 
-    left_join(genes, by = "gene_id") |> 
-    mutate(
-      gene_symbol = if_else(is.na(gene_symbol), gene_id, gene_symbol),
-      logCPM = mrlog,
-      sig = FDR < fdr_limit & abs(logFC) > logfc_limit
-    )
+    mutate(contrast = contrast |> str_replace(" - ", "-") |> str_remove_all("group") |> as_factor()) |> 
+    select(-F) |>
+    add_genes(set$genes)
+}
+
+select_top_genes <- function(de, ctr, direction = "up", n_genes = 6,
+                             fdr_limit = 0.01, log_cpm_limit = 4) {
+  d <- de |> 
+    filter(contrast == ctr & FDR < fdr_limit & logCPM > log_cpm_limit)
+  if(direction == "up") {
+    d <- d |> arrange(-logFC)
+  } else {
+    d <- d |> arrange(logFC)
+  }
+  d |> 
+    head(n_genes) |> 
+    pull(id)
 }
 
 
-limma_de <- function(set, what, gene_info, formula, base_condition, fdr_limit = 0.01, logfc_limit = 0) {
-  genes <- gene_info |> 
-    select(gene_id, gene_symbol, gene_biotype, description) |> 
-    distinct()
-  
-  meta <- set$metadata |>
-    mutate(condition = fct_relevel(condition, base_condition))
+write_de <- function(de, genes, file) {
+  genes <- genes |> 
+    select(id, description)
+  de |> 
+    left_join(genes, by = "id") |> 
+    mutate(across(where(is.numeric), ~signif(.x, 4))) |> 
+    write_csv(file)
+}
 
-  mexpr <- set$dat |> 
-    left_join(set$metadata, by = "sample") |> 
-    filter(condition == base_condition) |> 
-    group_by(gene_id) |> 
-    summarise(mrlog = mean(rlog)) |> 
-    ungroup()
-  
+
+
+
+
+#' Differential Expression Analysis with Formula
+#'
+#' This function performs differential expression analysis using the limma
+#' package with a specified formula.
+#'
+#' @param set A list containing the dataset, with `dat` and `metadata` elements.
+#' @param formula A formula specifying the model for the analysis.
+#' @param what A character string specifying the data type to analyze. Default
+#'   is `"abu_med"`.
+#' @param filt A character string representing a logical expression to filter
+#'   the metadata. Default is `"TRUE"`.
+#' @param names A character string specifying the sample names variable. Default
+#'   is `"sample"`.
+#'
+#' @return A tibble with the differential expression results.
+limma_de_f <- function(set, formula, what = "abu_med", filt = "TRUE", names = "sample") {
+  meta <- set$metadata |>
+    filter(!bad & !!rlang::parse_expr(filt)) |>
+    droplevels()
+
+  tab <- dat2mat(set$dat, what = what, sample_var = names)[, as.character(meta[[names]])]
   design_mat <- model.matrix(as.formula(formula), data = meta)
-  coefs <- colnames(design_mat)[-1]
-  
-  tab <- dat2mat(set$dat, what = what)
-  tab <- tab[, meta$sample]
-  
-  fit <- tab |> 
+
+  fit <- tab |>
     limma::lmFit(design_mat) |>
     limma::eBayes()
-  
-  map(coefs, function(cf) {
-    fit |>
-      limma::topTable(coef = cf, number = 1e6, sort.by = "none") |>
-      as_tibble(rownames = "gene_id") |>
-      add_column(contrast = cf)    
-  }) |> 
-    list_rbind() |> 
-    rename(FDR = adj.P.Val, PValue = P.Value) |>
-    left_join(mexpr, by = "gene_id") |> 
-    left_join(genes, by = "gene_id") |> 
-    mutate(
-      gene_symbol = if_else(is.na(gene_symbol), gene_id, gene_symbol),
-      sig = FDR < fdr_limit & abs(logFC) > logfc_limit,
-      logCPM = mrlog
-    ) |> 
-    select(gene_id, logFC, logCPM, t, PValue, FDR, contrast, gene_symbol, description, sig)
+
+  tabulate_de(fit)
 }
 
+#' Convert Limma Output into a Useful Format
+#'
+#' This function processes the raw output from a limma differential expression
+#' analysis into a more user-friendly format.
+#'
+#' @param fit A MArrayLM object resulting from the `limma` package's `lmFit`
+#'   function.
+#' @param remove_intercept Logical indicating whether to remove the intercept
+#'   term from the results. Default is `TRUE`.
+#'
+#' @return A tibble with the processed differential expression results.
+tabulate_de <- function(fit, remove_intercept = TRUE) {
+  coefs <- colnames(fit$coefficients)
+  if(remove_intercept)
+    coefs <- coefs |> str_subset("Intercept", negate = TRUE)
+  map_dfr(coefs, function(ctr) {
+    limma::topTable(fit, coef = ctr, number = 1e6, sort.by = "none") |>
+      as_tibble(rownames = "id") |>
+      add_column(contrast = ctr)
+  }) |>
+    drop_na() |>
+    select(-c(t, B)) |>
+    rename(FDR = adj.P.Val, PValue = P.Value) |>
+    mutate(
+      id = as.character(id),
+      logFC = logFC / log10(2),    # convert into log2
+      contrast = factor(contrast, levels = coefs)
+    )
+}
+
+
+
+select_de_ids <- function(de, fdr_limit) {
+  contrasts <- levels(de$contrast)
+
+  map(contrasts, function(ctr) {
+    de |> 
+      filter(contrast == ctr & FDR < fdr_limit) |> 
+      arrange(FDR) |> 
+      pull(id)
+  }) |> 
+    set_names(contrasts)
+
+}
