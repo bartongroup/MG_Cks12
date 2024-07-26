@@ -15,7 +15,7 @@ write_shiny_file <- function(obj, method = c("qs", "rds")) {
 }
 
  
-save_data_for_shiny <- function(star, de1, de2, terms, fterms) {
+save_data_for_shiny <- function(star, de1, de2, terms, fterms, gse1, gse2) {
   de1 <- de1 |>
     select(id, log_fc = logFC, expr = logCPM, p_value = PValue, contrast)
   de2 <- de2 |>
@@ -37,6 +37,8 @@ save_data_for_shiny <- function(star, de1, de2, terms, fterms) {
   write_shiny_file(features)
   write_shiny_file(fterms)
   write_shiny_file(terms)
+  write_shiny_file(gse1)
+  write_shiny_file(gse2)
 }
 
 

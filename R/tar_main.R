@@ -5,7 +5,6 @@ targets_main <- function() {
     chromosomes = biomart_fetch_chromosomes(mart),
     gns = biomart_fetch_genes(mart),
     terms = get_functional_terms(config, gns),
-    gterms = prepare_terms_gsea(terms, star$genes$id),
     fterms = prepare_terms_fenr(terms, star$genes$id)
   )
   
@@ -75,15 +74,15 @@ targets_main <- function() {
   )
 
   gene_set_enrichment <- tar_plan(
-    gse1 = fgsea_all_terms(def1, gterms),
-    gse2 = fgsea_all_terms(def2, gterms),
-    gse_example = list(ontology = "bp", term_id = "bioplanet_1138", contrast = "treatmentsiCks1.2"),
+    gse1 = fgsea_all_terms(def1, filt = "logCPM > 0", fterms = fterms),
+    gse2 = fgsea_all_terms(def2, filt = "logCPM > 0", fterms = fterms),
+    gse_example = list(ontology = "go", term_id = "GO:0007059", contrast = "treatmentsiCks1.2"),
     gse_random = list(ontology = "bp", term_id = "bioplanet_1340", contrast = "treatmentsiCks1.2"),
     gse_example_stats = make_gse_example(def1, terms, gse1, gse_example),
     gse_random_stats = make_gse_example(def1, terms, gse1, gse_random),
     
-    fig_fg_example = plot_fgsea_enrichment(def1, gterms, gse_example),
-    fig_fg_example_random = plot_fgsea_enrichment(def1, gterms, gse_random)
+    fig_fg_example = plot_fgsea_enrichment(def1, fterms, gse_example),
+    fig_fg_example_random = plot_fgsea_enrichment(def1, fterms, gse_random)
   )
 
   for_report <- tar_plan(
@@ -92,7 +91,14 @@ targets_main <- function() {
   )
   
   for_shiny <- tar_plan(
-    sav_shiny = save_data_for_shiny(star, def1, def2, terms, fterms)
+    sav_shiny = save_data_for_shiny(star, def1, def2, terms, fterms, gse1, gse2)
+  )
+
+  downloads <- tar_plan(
+    tbl_cnt = write_counts(star, "tab/normalized_counts.csv"),
+    tbl_def1 = write_de(def1, star$genes, "tab/de_treatment.csv"),
+    tbl_def2 = write_de(def2, star$genes, "tab/de_separate.csv"),
+    tbl_gse = write_gse(gse1, gns, "tab/gse.csv")
   )
 
   c(
@@ -104,6 +110,7 @@ targets_main <- function() {
     de,
     gene_set_enrichment,
     for_report,
-    for_shiny
+    for_shiny,
+    downloads
   )
 }

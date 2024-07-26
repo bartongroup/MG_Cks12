@@ -69,7 +69,7 @@ plot_ma <- function(res, a = "AveExpr", fc = "logFC", p = "PValue", fdr = "FDR",
     ) |>
     plot_volma(point_size, point_alpha) +
     geom_hline(yintercept = 0, linewidth = 0.1, alpha = 0.5) +
-    labs(x = expression(log[10]~Intensity), y = expression(log[2]~FC))
+    labs(x = expression(Mean~log[2]~CPM), y = expression(log[2]~FC))
 }
 
 plot_volcano <- function(res, fc = "logFC", p = "PValue", fdr = "FDR", group = "contrast",
@@ -625,7 +625,7 @@ plot_gene_count <- function(set, gid, val = "count_norm", log.scale = FALSE, nco
 }
 
 plot_gene_groups <- function(set, gid, val = "count_norm", log_scale = FALSE, zero_scale = TRUE,
-                             ncol = 4, symbol.size = 3, cex = 2, group_var = "group",
+                             ncol = 4, symbol.size = 3, cex = 2, group_var = "group", w_mean = 0.3,
                              scales = "free_y") {
   d <- set$dat |> 
     filter(id %in% gid & !bad) |>
@@ -647,16 +647,17 @@ plot_gene_groups <- function(set, gid, val = "count_norm", log_scale = FALSE, ze
   
   dm <- d |> 
     group_by(gene_symbol, group) |> 
-    summarise(M = mean(value))
+    summarise(M = mean(value))  |> 
+    mutate(ix = group |> factor() |> as.integer())
 
-  g <- ggplot(d, aes(x = group, y = value, fill = as.factor(replicate), shape = zero)) +
+  g <- ggplot(d) +
     theme_bw() +
     theme(
       axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
       #legend.position = "none"
     ) +
-    geom_beeswarm(size = symbol.size, cex = cex) +
-    geom_point(data = dm, aes(x = group, y = M), shape = 3, size = 5, colour = "black", fill = "black") +
+    geom_beeswarm(aes(x = group, y = value, fill = as.factor(replicate), shape = zero), size = symbol.size, cex = cex) +
+    geom_segment(data = dm, aes(x = ix - w_mean, xend = ix + w_mean, y = M, yend = M)) +
     labs(x = NULL, y = ylab, fill = "Replicate") +
     facet_wrap(~gene_symbol, labeller = label_wrap_gen(), scales = scales, ncol = ncol) +
     scale_shape_manual(values = c(21,23)) +
@@ -938,4 +939,19 @@ plot_condition_normalization <- function(set) {
     facet_wrap(~name) +
     scale_colour_manual(values = okabe_ito_palette) +
     labs(x = NULL, y = "Mean log-ratio")
+}
+
+plot_de_heatmap <- function(set, sites, what = "value_med", max.scale = NULL) {
+  if (nrow(sites) == 0) return(NULL)
+  mat <- set$dat %>%
+    mutate(val = get(what)) %>%
+    right_join(sites, by = c("id", "multi")) %>%
+    mutate(sample = factor(sample, levels = set$metadata$sample)) %>%
+    group_by(id, multi) %>%
+    mutate(M = mean(val), logfc = log2(val / M)) %>%
+    pivot_wider(id_cols = c(id, multi), names_from = sample, values_from = logfc) %>%
+    left_join(select(set$info, id, gene_name), by = "id") %>%
+    unite("gid", gene_name, id, multi, sep = "-") %>%
+    column_to_rownames("gid")
+  ggheatmap(mat, legend.name = expression(log[2]~FC), with.y.text = TRUE, order.col = FALSE)
 }

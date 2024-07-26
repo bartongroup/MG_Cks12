@@ -10,6 +10,7 @@
     "features": "features.qs",
     "terms" : "terms.qss",
     "fterms": "fterms.qs",
-    "gse" : "gse.qs"
+    "de" : "de1.qs",
+    "gse" : "gse1.qs"
   }
 }

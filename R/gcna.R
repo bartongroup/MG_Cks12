@@ -1,11 +1,12 @@
-wgcna_prepare_data <- function(set, filt, what = "rlog", id_col = "gene_id") {
-  m <- set$metadata
-  if(!is.null(filt))
-    m <- m |> filter(!!rlang::parse_expr(filt))
+wgcna_prepare_data <- function(set, filt = "TRUE", what = "rlog", id_col = "id", sample_var = "sample") {
+  meta <- set$metadata |>
+    filter(!bad & !!rlang::parse_expr(filt)) |>
+    droplevels()
+  dat <- set$dat |> 
+    filter(!bad)
   
-  set$dat |> 
-    filter(gene_id %in% set$sel) |> 
-    filter(sample %in% m$sample) |> 
+  dat |> 
+    filter(sample %in% meta$sample) |> 
     pivot_wider(id_cols = sample, names_from = !!id_col, values_from = !!what) |> 
     column_to_rownames("sample") |> 
     as.matrix()
@@ -40,7 +41,7 @@ merge_modules <- function(tab, mods, clust_method, me_diss_cut, id_col) {
     mutate(across(c(colour, merged_colour), \(x) x |> as_factor() |> fct_relevel("grey")))
 }
 
-wgcna_analysis <- function(set, filt = NULL, what = "rlog", id_col = "gene_id",
+wgcna_analysis <- function(set, filt = "TRUE", what = "rlog", id_col = "id",
                            gene_sel = NULL, ncores = 4, R2_cut = 0.85, power = NULL,
                            adjacency_type = "signed hybrid", clust_method = "complete",
                            min_module_size = 30, me_diss_cut = 0.25, deep_split = 2) {
@@ -126,12 +127,14 @@ wgcna_analysis <- function(set, filt = NULL, what = "rlog", id_col = "gene_id",
 }
 
 
-wgcna_create_network <- function(wg, mod, g2n, tom_cut = 0.1) {
+wgcna_create_network <- function(wg, mod, gns, tom_cut = 0.1) {
+  g2n <- gns |> 
+    select(id, gene_symbol) |> 
+    distinct()
   sel <- wg$mods |> 
-    mutate(i = seq_along(gene_id)) |> 
-    filter(merged_module == mod) |> 
-    mutate(gene_symbol = g2n[gene_id]) |> 
-    mutate(gene_symbol = if_else(is.na(gene_symbol), gene_id, gene_symbol))
+    mutate(i = seq_along(id)) |> 
+    filter(module == mod) |> 
+    left_join(g2n, by = join_by(id))
 
   # TOM subset for genes in a given module
   tom <- wg$tom[sel$i, sel$i]
@@ -140,11 +143,11 @@ wgcna_create_network <- function(wg, mod, g2n, tom_cut = 0.1) {
   tom[tom != 1] <- 0
   
   ntw <- tom |> 
-    igraph::graph.adjacency() |> 
+    igraph::graph_from_adjacency_matrix() |> 
     igraph::simplify()
   
-  V(ntw)$name <- sel$gene_symbol
-  ntw <- delete.vertices(ntw, degree(ntw) == 0)
+  igraph::V(ntw)$name <- sel$gene_symbol
+  ntw <- igraph::delete_vertices(ntw, igraph::degree(ntw) == 0)
   
   ntw
 }
@@ -153,13 +156,13 @@ wgcna_create_network <- function(wg, mod, g2n, tom_cut = 0.1) {
 plot_wgcna_profiles <- function(set, wg) {
   d <- set$dat |>
     filter(sample %in% wg$samples) |> 
-    group_by(gene_id) |>
+    group_by(id) |>
     mutate(
       m = mean(rlog),
       r = rlog - m
     ) |>
     ungroup() |>
-    right_join(wg$mods, by = "gene_id") |> 
+    right_join(wg$mods, by = "id") |> 
     filter(merged_module > 0)
   dm <- d |> 
     group_by(merged_module, sample) |> 
@@ -167,7 +170,7 @@ plot_wgcna_profiles <- function(set, wg) {
 
   d |> 
     ggplot() +
-    geom_line(aes(x = sample, y = r, group = gene_id), colour = "grey50", alpha = 0.3) +
+    geom_line(aes(x = sample, y = r, group = id), colour = "grey50", alpha = 0.3) +
     theme_bw() +
     theme(
       panel.grid = element_blank(),
@@ -197,8 +200,8 @@ plot_wgcna_scale <- function(wg, threshold = 0.9) {
 plot_wgcna_heatmap <- function(set, wg, mod) {
   gns <- wg$mods |>
     filter(module == mod) |>
-    pull(gene_id)
-  plot_de_heatmap(set, gns)
+    pull(id)
+  plot_de_heatmap(set, gns, what = "rlog")
 }
 
 plot_wgcna_dendro <- function(wg, pdf_file) {
@@ -210,17 +213,17 @@ plot_wgcna_dendro <- function(wg, pdf_file) {
 
 tabulate_wgcna <- function(wg, genes) {
   genes <- genes |> 
-    select(gene_id, gene_symbol = gene_name, description) |> 
+    select(id, gene_symbol = gene_name, description) |> 
     distinct()
   wg$mods |> 
     filter(merged_module > 0) |> 
-    left_join(genes, by = "gene_id") |> 
-    select(gene_id, module = merged_module, gene_symbol, description) |> 
+    left_join(genes, by = "id") |> 
+    select(id, module = merged_module, gene_symbol, description) |> 
     arrange(module)
 }
 
 
-diffcoex_analysis <- function(set, groups, what = "rlog", id_col = "gene_id", group_var = "treatment",
+diffcoex_analysis <- function(set, groups, what = "rlog", id_col = "id", group_var = "treatment",
                               subsample = NULL) {
   stopifnot(length(groups) == 2)
   
@@ -264,7 +267,7 @@ wgcna_enrichment <- function(wg, all_genes, terms, gene2name) {
     map_dfr(modules, function(mod) {
       sel_genes <- mods |> 
         filter(merged_module == mod) |> 
-        pull(gene_id) |> 
+        pull(id) |> 
         unique()
       fe <- fenr::functional_enrichment(all_genes, sel_genes, terms[[ont]], gene2name)
       if(!is.null(fe))

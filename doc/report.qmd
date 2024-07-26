@@ -125,7 +125,7 @@ By studying Cks1 and Cks2, researchers can better understand the mechanisms unde
 
 # Data analysis
 
-The data analysis was conducted in two stages. The first stage was carried out on the Life Sciences cluster using a Snakemake script. This stage encompassed the cleaning, quality control, and mapping of FASTQ files. The software versions employed in this stage are listed in @tbl-software. In the second stage, the data were imported into [Positron](https://github.com/posit-dev/positron) and further processed using R. The versions of the R packages utilized are detailed in @sec-session-info. All code used in this project is available on [GitHub](https://github.com/bartongroup/MG_Cks12).
+The data analysis was conducted in two stages. The first stage was carried out on the Life Sciences cluster using a Snakemake script. This stage encompassed the cleaning, quality control, and mapping of FASTQ files. The software versions employed in this stage are listed in @tbl-software. In the second stage, the data were imported into [Positron](https://github.com/posit-dev/positron) and further processed using R. The versions of the R packages utilized are detailed in @sec-packages. All code used in this project is available on [GitHub](https://github.com/bartongroup/MG_Cks12).
 
 ```{r}
 #| label: tbl-software
@@ -140,25 +140,15 @@ tar_read(software_versions) |>
 
 # Design
 
-The experimental data came in two batches. The Pilot was done in two cell lines and two time points, but with no replicates, so it was decided to repeat the experiment in the smaller setting - with one time point and one cell line.  @tbl-metadata presents the full experimental design. The `Sample` column contains the sample names referenced throughout this report. The Pilot samples were removed from downstream analysis (see below for explanation).
+The experimental data came in two batches. The Pilot was done in two cell lines and two time points, but with no replicates, so it was decided to repeat the experiment in the smaller setting - with one time point and one cell line. @tbl-metadata presents the full experimental design. The `Sample` column contains the sample names referenced throughout this report. The Pilot samples were removed from downstream analysis (see below for explanation).
 
 ```{r}
 #| label: tbl-metadata
-#| tbl-cap: Design of the experiment. The shaded rows indicate samples removed from downstream analysis.
+#| tbl-cap: Design of the experiment.
 #| cache: false
 targets::tar_read(metadata) |> 
-  dplyr::select(Experiment = experiment, Sample = sample, `Original sample` = raw_sample, `Cell line` = cell_line, `Time point` = time_point, Treatment = treatment, siCks1, siCks2, Replicate = replicate, bad) |> 
-  gt::gt() |> 
-    gt::tab_style(
-    style = list(
-      gt::cell_fill(color = "#FFE4B5")
-    ),
-    locations = gt::cells_body(
-      columns = gt::everything(),
-      rows = bad == TRUE
-    )
-  ) |> 
-    gt::cols_hide(bad) 
+  dplyr::select(Experiment = experiment, Sample = sample, `Original sample` = raw_sample, `Cell line` = cell_line, `Time point` = time_point, Treatment = treatment, siCks1, siCks2, Replicate = replicate) |> 
+  gt_table()
 ```
 
 
@@ -166,7 +156,7 @@ targets::tar_read(metadata) |>
 
 ## Sequencing
 
-Sequencing was done by NovoGene. We have paired-end reads 2 x 150 bp.
+Sequencing was done by NovoGene. We have received paired-end reads 2 x 150 bp.
 
 ## Ribosomal RNA removal
 
@@ -191,7 +181,7 @@ notable contamination from other organisms.
 
 ```{r}
 #| label: fig-fscreen
-#| fig-cap: Fscreen results, one hit per one genome and multiple hits per one genome are inluded.
+#| fig-cap: Fscreen results, one hit per one genome and multiple hits per one genome are inluded. The colour scale is logarithmic and grey indicates no hits.
 #| fig-width: 6
 #| fig-height: 4
 tar_read(fig_fscreen)
@@ -297,11 +287,11 @@ The full quality-control report, based on *FastQC*, *FastQ Screen*,
 
 # Read count properties
 
-@fig-sample-dist shows read count distribution.
+@fig-sample-dist shows the read count distribution.
 
 ```{r}
 #| label: fig-sample-dist
-#| fig-cap: Distribution of raw read count per sample. Black lines show the median of each sample. Zeroes are not shown in the distribution, but they are included in the median calculation.
+#| fig-cap: Distribution of raw read counts per sample. Black lines show the median of each sample. Zeroes are not shown in the distributions, but they are included in the median calculation.
 knitr::include_graphics("../fig/sample_quasirandom.png")
 ```
 
@@ -330,7 +320,7 @@ There is a large disparity between the Pilot and experiment EK_042. This can be 
 
 ```{r}
 #| label: fig-cks
-#| fig-cap: Normalized count from Cks1 and Cks2 genes under different treatments.
+#| fig-cap: Normalized count from Cks1 and Cks2 genes under different treatments. Black horizontal lines indicate the mean count in the condition.
 #| fig-width: 6
 #| fig-height: 3
 tar_read(fig_cks)
@@ -365,8 +355,8 @@ plot_grid(plotlist = figs_def1, ncol = 1, labels = c("A", "B", "C"))
 ```{r}
 #| label: fig-upset-1
 #| fig-cap: Overlap between significant genes in the treatment model.
-#| fig-width: 6
-#| fig-height: 6
+#| fig-width: 5
+#| fig-height: 5
 tar_load(def1_ids)
 upset(fromList(def1_ids))
 ```
@@ -395,8 +385,8 @@ plot_grid(plotlist = figs_def2, ncol = 1, labels = c("A", "B", "C"))
 ```{r}
 #| label: fig-upset-2
 #| fig-cap: Overlap between significant genes in the independent siCks1 and siCks2 model.
-#| fig-width: 6
-#| fig-height: 6
+#| fig-width: 4.5
+#| fig-height: 5
 tar_load(def2_ids)
 upset(fromList(def2_ids))
 ```
@@ -405,23 +395,89 @@ upset(fromList(def2_ids))
 
 # Gene set enrichment
 
-Gene set enrichment analysis (using `fgsea` package) did not find any significant terms in GO, KEGG, Reactom and Bioplanet.
+## Explanation
+
+```{r gse_stats}
+tar_load(gse_example_stats)
+tar_load(gse_random_stats) 
+```
+
+Gene Set Enrichment Analysis (GSEA) is a computational method that
+determines whether a predefined set of genes shows statistically
+significant, concordant differences between two biological states (e.g.,
+treatment vs control). This method is typically used in the analysis of
+genome-wide expression profiles.
+
+To simplify, let's say you have a list of all the genes in a genome,
+ranked from the most up-regulated to the most down-regulated in
+inhibitor compared to control. A gene set is a group of genes that share
+a common biological function. Here we use functional annotations from
+Gene Ontology, KEGG or Reactome. A set is a group of genes annotated
+with the same functional term. GSEA asks if members of a particular gene
+set are randomly distributed throughout the ranked list or primarily
+found at the top or bottom of the list, indicating that they might be
+involved in the disease process.
+
+The enrichment score, ES, is calculated by walking down the ranked list
+of genes (ordered by logFC) and increasing a running-sum statistic when
+we encounter a gene annotated with the term and decreasing it when we
+encounter genes not annotated with the term. The significance of ES is
+estimated by a permutation test. An example of a GSE plot for one
+functional term is shown in @fig-fg-example.
+
+```{r}
+#| label: fig-fg-example
+#| fig-cap: !expr str_glue("Example of gene set enrichment for a term {gse_example_stats$term_id}, *{gse_example_stats$term_name}*. The fold changes are taken from the differential expression result of {gse_example_stats$contrast} contrast. The horizontal axis contains {gse_example_stats$n_genes_used} genes used in differential expression ranked according to fold change, up-regulated genes to the left, down-reguleted to the right. Vertical lines indicate {gse_example_stats$n_genes_in_term} genes annotated with term {gse_example_stats$term_id}. They are distributed non-randomly throughout the ranked list, and are primarily found at the bottom of the list (negative log-fold-changes). The leading edge is a subset of annotated genes from the highest rank to the peak of the green curves, there are {gse_example_stats$n_leading_edge} such genes.")
+#| fig-width: 5
+#| fig-height: 5
+tar_read(fig_fg_example)
+```
+
+The enrichment score is the extreme (positive or negative) value
+achieved by the green curve - represented by the dashed red line.
+@fig-fg-example shows that genes annotated with
+`r gse_example_stats$term_id` are not randomly distributed throughout
+the ranked list of genes, but they are concentrated towards the top of
+the list (to the left in the figure), and are mostly (but not all of
+them) up-regulated.
+
+In contrast, @fig-fg-example-rand shows GSE for GO term
+`r gse_random_stats$term_id`, *`r gse_random_stats$term_name`*, where
+genes annotated with this term are distributed randomly throughout the
+ranked list. The enrichment score is small and the result is not
+statistically significant.
+
+```{r}
+#| label: fig-fg-example-rand
+#| fig-cap: !expr str_glue("Example of gene set enrichment for a GO term {gse_random_stats$term_id}, *{gse_random_stats$term_name}*. The fold changes are taken from the differential expression result of CDK6/4i vs control contrast. The genes annotated with this term are distributed randomly throughout the ranked list.")
+#| fig-width: 5
+#| fig-height: 5
+tar_read(fig_fg_example_random)
+```
+
+The **leading edge** is the subset of genes that contribute most to the
+enrichment score. In the case shown in @fig-fg-example these are genes
+to the right of the extreme value of the green curve.
+
+After inspecting the MA plots we decided to select only genes with mean logCPM > 0 for gene set enrichemnt, to avoid excessive noise from lowly-expressed genes. Gene set enrichment results are available via online explorer tool, see
+@sec-explorers. 
 
 
 # Resources
 
 ## Interactive data explorers {#sec-explorers}
 
--   [Differential
+- [Differential
     expression](https://gjb-shiny.compbio.dundee.ac.uk/mgierlinski/private/cks12/de)
+- [Gene set enrichment](https://gjb-shiny.compbio.dundee.ac.uk/mgierlinski/private/cks12/gsea)
 
 ## Downloads {#sec-downloads}
 
--   [Normalized
+- [Normalized
     counts](https://www.compbio.dundee.ac.uk/user/mgierlinski/cks12/tab/normalized_counts.csv)
--   [Differential expression selected
-    contrasts](https://www.compbio.dundee.ac.uk/user/mgierlinski/cks12/tab/de_contrasts.csv)
--   [Gene set
+- [Differential expression treatment model](https://www.compbio.dundee.ac.uk/user/mgierlinski/cks12/tab/de_contrasts.csv)
+- [Differential expression independent model](https://www.compbio.dundee.ac.uk/user/mgierlinski/cks12/tab/de_separate.csv)
+- [Gene set
     enrichment](https://www.compbio.dundee.ac.uk/user/mgierlinski/cks12/tab/gse.csv)
 
 ## Code
@@ -470,7 +526,7 @@ session_info$platform |>
   )
 ```
 
-## Packages
+## Packages {#sec-packages}
 
 ```{r}
 #| label: session-info-packages
