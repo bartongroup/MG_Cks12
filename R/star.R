@@ -660,6 +660,9 @@ despike <- function(set) {
 #'   samples. The visualization includes separate facets for absolute counts and
 #'   percentages, facilitating easy comparison and interpretation.
 plot_mapped_count <- function(set, nrow = 1) {
+  env <- new.env(parent = globalenv())
+  env$nrow <- nrow
+
   sm <- colSums(set$tab)
   cnt <- tibble(
     sample = names(sm),
@@ -711,26 +714,29 @@ plot_mapped_count <- function(set, nrow = 1) {
     distinct() |> 
     mutate(rank = as.character(rank))
   
-  get_labels <- function(rnk) {
-    tibble(rank = rnk) |> 
-      left_join(labs, by = "rank") |> 
-      pull(sample)
-  }
-  
-  dat |> 
-    ggplot(aes(x = as_factor(rank), y = value, colour = key)) +
-    theme_bw() +
-    theme(
-      panel.grid = element_blank(),
-      axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
-    ) +
-    geom_segment(aes(xend = as_factor(rank), yend = 0), colour = "grey90") +
-    geom_point() +
-    scale_colour_manual(values = okabe_ito_palette) +
-    scale_x_discrete(labels = get_labels) +
-    scale_y_continuous(expand = expansion(mult = c(0, 0.03))) +
-    facet_wrap(~ what, scales = "free", nrow = nrow) +
-    labs(x = NULL, y = "Read count (millions)", colour = "Legend")
+  env$dat <- dat
+  env$labs <- labs
+  with(env, {
+    get_labels <- function(rnk) {
+      tibble(rank = rnk) |> 
+        left_join(labs, by = "rank") |> 
+        pull(sample)
+    }
+    dat |> 
+      ggplot(aes(x = as_factor(rank), y = value, colour = key)) +
+      theme_bw() +
+      theme(
+        panel.grid = element_blank(),
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+      ) +
+      geom_segment(aes(xend = as_factor(rank), yend = 0), colour = "grey90") +
+      geom_point() +
+      scale_colour_manual(values = okabe_ito_palette) +
+      scale_x_discrete(labels = get_labels) +
+      scale_y_continuous(expand = expansion(mult = c(0, 0.03))) +
+      facet_wrap(~ what, scales = "free", nrow = nrow) +
+      labs(x = NULL, y = "Read count (millions)", colour = "Legend")
+  })
 }
 
 

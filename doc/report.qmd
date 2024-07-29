@@ -331,7 +331,7 @@ tar_read(fig_cks)
 Only genes with at least 10 counts in at least one sample were retained for this analysis. Only EK_042 data were used. P-values were corrected for multiple tests using the Benjamini-Hochberg method. Unless stated otherwise, the significance threshold is set to FDR < 0.01.
 
 
-## Treatment model
+## Three conditions {#sec-treatment-model}
 
 Differential expression was carried out with *edgeR* with a model
 
@@ -339,7 +339,9 @@ Differential expression was carried out with *edgeR* with a model
 ~ treatment
 ```
 
-The baseline was `treatment = siNT`, and the contrasts are for treatments `siCks1`, `siCks2` and  `siCks1.2`, separately. The results are shown in @fig-def1.
+The baseline was `treatment = siNT`, and the contrasts are for treatments `siCks1`, `siCks2` and  `siCks1.2`, separately. Here, the model is not informed about `siCks1.2` being the joined effect of `siCks1` and `siCks2`. From the point of view of the model we have three unrelated conditions with given labels `siCks1`, `siCks2` and  `siCks1.2`.
+
+The results are shown in @fig-def1.
 
 ```{r}
 #| label: fig-def1
@@ -369,7 +371,9 @@ Here the model is
 ~ siCks1 + siCks2
 ```
 
-where `siCks1` and `siCks2` are defined as in @tbl-metadata. They represent *independent* contributions from Cks1/2 depletion. The baseline was `siCks1 = '-'` and `siCks2 = '-'`. The results are shown in @fig-def1.
+where `siCks1` and `siCks2` are defined by `-` and `+`, as in @tbl-metadata. They represent contributions from Cks1 and Cks2 depletions assumed to be *independent*. Here the samples where `siCks1 = '+'` and `siCks2 = '+'` (those marked as `treatment = siCks1.2`) are indeed under the treatment from both inhibitors. This is different to the approach used in @sec-treatment-model, where `siCks1.2` is just label assigned to a condition, and no relation to `siCks1` and `siCks2` was assumed.
+
+The baseline in the model considered here was `siCks1 = '-'` and `siCks2 = '-'`. The results are shown in @fig-def1.
 
 ```{r}
 #| label: fig-def2
@@ -377,8 +381,10 @@ where `siCks1` and `siCks2` are defined as in @tbl-metadata. They represent *ind
 #| fig-width: 6
 #| fig-height: 10
 tar_load(figs_def2)
-plot_grid(plotlist = figs_def2, ncol = 1, labels = c("A", "B", "C"))
+plot_grid(plotlist = figs_def2, ncol = 1, labels = c("A", "B", "C")) 
 ```
+
+We also tested a model with interactions, `~ siCks1 + siCks2 + siCks1:siCks2`, where the interaction term `siCks1:siCks2` represent genes changing only as an interaction between `siCks1` and `siCks2`, but the interaction term showed no significant genes. This confirms that contributions from `siCks1` and `siCks2` are independent.
 
 ## Significant genes overlap
 
@@ -388,7 +394,7 @@ plot_grid(plotlist = figs_def2, ncol = 1, labels = c("A", "B", "C"))
 #| fig-width: 4.5
 #| fig-height: 5
 tar_load(def2_ids)
-upset(fromList(def2_ids))
+upset(fromList(def2_ids)) 
 ```
 
 
@@ -459,7 +465,7 @@ The **leading edge** is the subset of genes that contribute most to the
 enrichment score. In the case shown in @fig-fg-example these are genes
 to the right of the extreme value of the green curve.
 
-After inspecting the MA plots we decided to select only genes with mean logCPM > 0 for gene set enrichemnt, to avoid excessive noise from lowly-expressed genes. Gene set enrichment results are available via online explorer tool, see
+After inspecting the MA plots we decided to select only genes with mean logCPM > 0 for gene set enrichemnt, to avoid excessive noise from lowly expressed genes. Gene set enrichment results are available via online explorer tool, see
 @sec-explorers. 
 
 
@@ -468,8 +474,8 @@ After inspecting the MA plots we decided to select only genes with mean logCPM >
 ## Interactive data explorers {#sec-explorers}
 
 - [Differential
-    expression](https://gjb-shiny.compbio.dundee.ac.uk/mgierlinski/private/cks12/de)
-- [Gene set enrichment](https://gjb-shiny.compbio.dundee.ac.uk/mgierlinski/private/cks12/gsea)
+    expression](https://shiny.compbio.dundee.ac.uk/mgierlinski/private/cks12/de)
+- [Gene set enrichment](https://shiny.compbio.dundee.ac.uk/mgierlinski/private/cks12/gsea)
 
 ## Downloads {#sec-downloads}
 

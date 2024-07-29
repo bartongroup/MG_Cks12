@@ -371,22 +371,27 @@ plot_distance_matrix <- function(set, what = "rlog", text_size = 10) {
 }
 
 
-plot_mean_var <- function(set, point.size = 0.5, what = "count_norm", group_var = "group") {
-  d <- set$dat |> 
+plot_mean_var <- function(set, point_size = 0.5, what = "count_norm", group_var = "group") {
+  env <- new.env(parent = globalenv())
+  env$point_size <- point_size
+
+  env$d <- set$dat |> 
     filter(!bad) |> 
     left_join(set$metadata, by = "sample") |> 
     mutate(val = get(what), group = get(group_var)) |> 
     group_by(id, group) |> 
     summarise(M = mean(val), V = var(val))
-  d |> 
-    ggplot(aes(x = log10(M), y = log10(V))) +
-    theme_bw() +
-    theme(panel.grid = element_blank()) +
-    ggpointdensity::geom_pointdensity(size = point.size) +
-    scale_fill_viridis_c() +
-    geom_abline(slope = 1, intercept = 0, colour = "red", alpha = 0.3) +
-    facet_wrap(~group) +
-    labs(x = expression(log[10]~mean), y = expression(log[10]~variance))
+  with(env, {
+    d |> 
+      ggplot(aes(x = log10(M), y = log10(V))) +
+      theme_bw() +
+      theme(panel.grid = element_blank()) +
+      ggpointdensity::geom_pointdensity(size = point_size) +
+      scale_colour_viridis_c(option = "cividis") +
+      geom_abline(slope = 1, intercept = 0, colour = "red", alpha = 0.3) +
+      facet_wrap(~group) +
+      labs(x = expression(log[10]~mean), y = expression(log[10]~variance))
+  })
 }
 
 
@@ -625,8 +630,17 @@ plot_gene_count <- function(set, gid, val = "count_norm", log.scale = FALSE, nco
 }
 
 plot_gene_groups <- function(set, gid, val = "count_norm", log_scale = FALSE, zero_scale = TRUE,
-                             ncol = 4, symbol.size = 3, cex = 2, group_var = "group", w_mean = 0.3,
+                             ncol = 4, symbol_size = 3, cex = 2, group_var = "group", w_mean = 0.3,
                              scales = "free_y") {
+  env <- new.env(parent = globalenv())
+  env$ncol <- ncol
+  env$symbol_size <- symbol_size
+  env$cex <- cex
+  env$w_mean <- w_mean
+  env$scales <- scales
+  env$log_scale <- log_scale
+  env$zero_scale <- zero_scale
+  
   d <- set$dat |> 
     filter(id %in% gid & !bad) |>
     select(-bad) |> 
@@ -650,21 +664,26 @@ plot_gene_groups <- function(set, gid, val = "count_norm", log_scale = FALSE, ze
     summarise(M = mean(value))  |> 
     mutate(ix = group |> factor() |> as.integer())
 
-  g <- ggplot(d) +
-    theme_bw() +
-    theme(
-      axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
-      #legend.position = "none"
-    ) +
-    geom_beeswarm(aes(x = group, y = value, fill = as.factor(replicate), shape = zero), size = symbol.size, cex = cex) +
-    geom_segment(data = dm, aes(x = ix - w_mean, xend = ix + w_mean, y = M, yend = M)) +
-    labs(x = NULL, y = ylab, fill = "Replicate") +
-    facet_wrap(~gene_symbol, labeller = label_wrap_gen(), scales = scales, ncol = ncol) +
-    scale_shape_manual(values = c(21,23)) +
-    guides(fill = guide_legend(override.aes = list(shape = 21))) +
-    scale_fill_manual(values = okabe_ito_palette)
-  if (!log_scale & zero_scale) g <-  g + scale_y_continuous(expand = expansion(mult = c(0, 0.03)), limits = c(0, NA)) 
-  g
+  env$d <- d
+  env$dm <- dm
+  env$ylab <- ylab
+  with(env, {
+    g <- ggplot(d) +
+      theme_bw() +
+      theme(
+        axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+        #legend.position = "none"
+      ) +
+      geom_beeswarm(aes(x = group, y = value, fill = as.factor(replicate), shape = zero), size = symbol_size, cex = cex) +
+      geom_segment(data = dm, aes(x = ix - w_mean, xend = ix + w_mean, y = M, yend = M)) +
+      labs(x = NULL, y = ylab, fill = "Replicate") +
+      facet_wrap(~gene_symbol, labeller = label_wrap_gen(), scales = scales, ncol = ncol) +
+      scale_shape_manual(values = c(21,23)) +
+      guides(fill = guide_legend(override.aes = list(shape = 21))) +
+      scale_fill_manual(values = okabe_ito_palette)
+    if (!log_scale & zero_scale) g <-  g + scale_y_continuous(expand = expansion(mult = c(0, 0.03)), limits = c(0, NA)) 
+    g
+  })
 }
 
 
